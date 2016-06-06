@@ -32,6 +32,8 @@ use constant {
 	HMUARTLGW_APP_SET_OLD_KEY       => "0F", #key index
 	HMUARTLGW_APP_DEFAULT_HMID      => "10",
 
+	HMUARTLGW_ACK                   => "01",
+	HMUARTLGW_ACK_WITH_DATA         => "07",
 	HMUARTLGW_ACK_EINPROGRESS       => "08",
 
         HMUARTLGW_DST_OS                => 0,
@@ -45,6 +47,7 @@ use constant {
 	HMUARTLGW_STATE_SET_HMID        => 5,
 	HMUARTLGW_STATE_GET_HMID        => 6,
 	HMUARTLGW_STATE_GET_DEFAULT_HMID => 7,
+	HMUARTLGW_STATE_GET_PEERS       => 8,
 	HMUARTLGW_STATE_KEEPALIVE_INIT  => 96,
 	HMUARTLGW_STATE_KEEPALIVE_SENT  => 97,
 	HMUARTLGW_STATE_SEND            => 98,
@@ -169,11 +172,10 @@ sub HMUARTLGW_Undefine($$)
 sub HMUARTLGW_Reopen($;$)
 {
 	my ($hash, $noclose) = @_;
+	$hash = $hash->{lgwHash} if ($hash->{lgwHash});
 	my $name = $hash->{NAME};
 
-	Log3($hash,1,"HMUARTLGW ${name} reopen");
-
-	$hash = $hash->{lgwHash} if ($hash->{lgwHash});
+	Log3($hash,1,"HMUARTLGW ${name} Reopen");
 
 	RemoveInternalTimer($hash);
 	if ($hash->{keepAlive}) {
@@ -195,11 +197,11 @@ sub HMUARTLGW_Ready($)
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
 
-	Log3($hash,1,"HMUARTLGW ${name} ready: ".$hash->{STATE});
-
 	if ((!$hash->{lgwHash}) && $hash->{STATE} eq "disconnected") {
 		return HMUARTLGW_Reopen($hash, 1);
 	}
+
+	Log3($hash,1,"HMUARTLGW ${name} ready: ".$hash->{STATE});
 
 	return 0;
 }
@@ -223,11 +225,13 @@ sub HMUARTLGW_LGW_Init($)
 			$hash->{DEVCNT} = hex($1);
 			$hash->{CNT} = hex($1);
 
-			readingsBeginUpdate($hash);
-			readingsBulkUpdate($hash, "D-type", $2);
-			readingsBulkUpdate($hash, "D-firmware", $3);
-			readingsBulkUpdate($hash, "D-serial", $4);
-			readingsEndUpdate($hash, 1);
+			if ($hash->{DevType} eq "LGW") {
+				readingsBeginUpdate($hash);
+				readingsBulkUpdate($hash, "D-type", $2);
+				readingsBulkUpdate($hash, "D-firmware", $3);
+				readingsBulkUpdate($hash, "D-serial", $4);
+				readingsEndUpdate($hash, 1);
+			}
 		} elsif ($line =~ m/^V(..),(................................)$/) {
 			$hash->{DEVCNT} = hex($1);
 			$hash->{CNT} = hex($1);
@@ -331,14 +335,60 @@ sub HMUARTLGW_SendKeepAlive($)
 	return;
 }
 
+sub HMUARTLGW_GetSetParameterReq($;$) {
+	my ($hash, $value) = @_;
+	my $name = $hash->{NAME};
+
+	RemoveInternalTimer($hash);
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_SET_HMID) {
+		my $hmId = AttrVal($name, "hmId", undef);
+
+		$hmId = $value if ($value);
+
+		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_HMID . $hmId, HMUARTLGW_DST_APP);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_HMID) {
+		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_HMID, HMUARTLGW_DST_APP);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_DEFAULT_HMID) {
+		HMUARTLGW_send($hash, HMUARTLGW_APP_DEFAULT_HMID, HMUARTLGW_DST_APP);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TIME) {
+		my $tmsg = HMUARTLGW_OS_SET_TIME;
+
+		my $t = time();
+		my @l = localtime($time);
+		my $off = (timegm(@l) - timelocal(@l)) / 1800;
+
+		$tmsg .= sprintf("%04x%02x", $t, $off);
+
+		HMUARTLGW_send($hash, $tmsg, HMUARTLGW_DST_OS);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
+		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
+	}
+
+	InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+}
+
 sub HMUARTLGW_GetSetParameters($;$)
 {
 	my ($hash, $msg) = @_;
 	my $name = $hash->{NAME};
 	my $oldState = $hash->{DevState};
 	my $hmId = AttrVal($name, "hmId", undef);
+	my $ack = substr($msg, 2, 2);
 
 	RemoveInternalTimer($hash);
+
+	Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack}") if ($ack);
+
+	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
+		#Retry
+		InternalTimer(gettimeofday()+0.5, "HMUARTLGW_GetSetParameterReq", $hash, 0);
+		return;
+	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_GETSET_PARAMETERS) {
 		if ($hmId) {
@@ -351,14 +401,23 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_GET_HMID;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_HMID) {
-		readingsSingleUpdate($hash, "D-HMIdAssigned", uc(substr($msg, 8)), 1);
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			readingsSingleUpdate($hash, "D-HMIdAssigned", uc(substr($msg, 8)), 1);
+		}
 		$hash->{DevState} = HMUARTLGW_STATE_GET_DEFAULT_HMID;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_DEFAULT_HMID) {
-		readingsSingleUpdate($hash, "D-HMIdOriginal", uc(substr($msg, 8)), 1);
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			readingsSingleUpdate($hash, "D-HMIdOriginal", uc(substr($msg, 8)), 1);
+		}
 		$hash->{DevState} = HMUARTLGW_STATE_SET_TIME;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TIME) {
+		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		}
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
 	} else {
@@ -381,30 +440,9 @@ sub HMUARTLGW_GetSetParameters($;$)
 		return;
 	}
 
-	if ($hash->{DevState} == HMUARTLGW_STATE_SET_HMID) {
-		my $hmsg = HMUARTLGW_APP_SET_HMID . $hmId;
-
-		HMUARTLGW_send($hash, $hmsg, HMUARTLGW_DST_APP);
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_HMID) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_HMID, HMUARTLGW_DST_APP);
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_DEFAULT_HMID) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_DEFAULT_HMID, HMUARTLGW_DST_APP);
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TIME) {
-		my $tmsg = HMUARTLGW_OS_SET_TIME;
-
-		my $t = time();
-		my @l = localtime($time);
-		my $off = (timegm(@l) - timelocal(@l)) / 1800;
-
-		$tmsg .= sprintf("%04x%02x", $t, $off);
-		
-		HMUARTLGW_send($hash, $tmsg, HMUARTLGW_DST_OS);
-	}
-
 	if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
-		InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+		HMUARTLGW_GetSetParameterReq($hash);
 	}
-
 }
 
 sub HMUARTLGW_Parse($$$)
@@ -639,7 +677,7 @@ sub HMUARTLGW_Attr(@)
 		if ($cmd eq "set") {
 			$hash->{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_HMID;
-			HMUARTLGW_send($hash, HMUARTLGW_APP_SET_HMID . $aVal, HMUARTLGW_DST_APP);
+			HMUARTLGW_GetSetParameterReq($hash, $aVal);
 		}
 	} elsif ($aName eq "lgwPw") {
 		if ($hash->{DevType} eq "LGW") {
