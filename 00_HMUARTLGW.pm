@@ -15,6 +15,8 @@ use constant {
 	HMUARTLGW_OS_NORMAL_MODE        => "06",
 	HMUARTLGW_OS_UPDATE_MODE        => "07",
 	HMUARTLGW_OS_GET_CREDITS        => "08",
+	HMUARTLGW_OS_UNKNOWN_9          => "09",
+	HMUARTLGW_OS_UNKNOWN_A          => "0A",
 	HMUARTLGW_OS_GET_SERIAL         => "0B",
 	HMUARTLGW_OS_SET_TIME           => "0E",
 
@@ -48,6 +50,15 @@ use constant {
 	HMUARTLGW_STATE_GET_HMID        => 6,
 	HMUARTLGW_STATE_GET_DEFAULT_HMID => 7,
 	HMUARTLGW_STATE_GET_PEERS       => 8,
+	HMUARTLGW_STATE_GET_FIRMWARE    => 9,
+	HMUARTLGW_STATE_UNKNOWN_A       => 10,
+	HMUARTLGW_STATE_UNKNOWN_9       => 11,
+	HMUARTLGW_STATE_CLEAR_PEERS     => 12,
+	HMUARTLGW_STATE_CLEAR_PEERS_AES => 13,
+	HMUARTLGW_STATE_UPDATE_PEER     => 90,
+	HMUARTLGW_STATE_UPDATE_PEER_AES1 => 91,
+	HMUARTLGW_STATE_UPDATE_PEER_AES2 => 92,
+	HMUARTLGW_STATE_UPDATE_PEER_CFG => 93,
 	HMUARTLGW_STATE_KEEPALIVE_INIT  => 96,
 	HMUARTLGW_STATE_KEEPALIVE_SENT  => 97,
 	HMUARTLGW_STATE_SEND            => 98,
@@ -95,6 +106,8 @@ sub HMUARTLGW_DoInit($)
 	delete($hash->{DEVCNT});
 	delete($hash->{crypto});
 	delete($hash->{keepAlive});
+	delete($hash->{Helper});
+	delete($hash->{AssignedPeerCnt});
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
 
 	$hash->{LGW_Init} = 1 if ($hash->{DevType} =~ m/^LGW/);
@@ -147,6 +160,7 @@ sub HMUARTLGW_Define($$)
 	} else {
 		$dev .= "\@115200";
 		$hash->{DevType} = "UART";
+		readingsSingleUpdate($hash, "D-type", "HM-MOD-UART", 1);
 	}
 
 	$hash->{DeviceName} = $dev;
@@ -188,7 +202,6 @@ sub HMUARTLGW_Reopen($;$)
 
 	DevIo_CloseDev($hash) if (!$noclose);
 
-	Log3($hash,1,"HMUARTLGW ${name} OpenDev");
 	return DevIo_OpenDev($hash, 1, "HMUARTLGW_DoInit");
 }
 
@@ -335,6 +348,94 @@ sub HMUARTLGW_SendKeepAlive($)
 	return;
 }
 
+sub HMUARTLGW_UpdatePeerReq($;$) {
+	my ($hash, $peer) = @_;
+	my $name = $hash->{NAME};
+
+	$peer = $hash->{Helper}{UpdatePeer} if (!$peer);
+
+	Log3($hash,1,"HMUARTLGW ${name} UpdatePeerReq: ".$peer->{id});
+
+	my $msg;
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
+		if ($peer->{operation} eq "-") {
+			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
+		} else {
+			my $flags = hex($peer->{flags});
+
+			$msg = HMUARTLGW_APP_ADD_PEER .
+			       $peer->{id} .
+			       $peer->{kNo} .
+			       (($flags & 0x01) ? "01" : "00") . #AES
+			       (($flags & 0x02) ? "01" : "00");  #Wakeup
+		}
+
+		$hash->{Helper}{UpdatePeer} = $peer;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
+		$msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{UpdatePeer}{id};
+		for (my $chan = 0; $chan < 60; $chan++) {
+			$msg .= sprintf("%02x", $chan);
+		}
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
+		$msg = HMUARTLGW_APP_PEER_ADD_AES . $peer->{id};
+
+		if ($peer->{operation} eq "+") {
+			my $aesChannels = hex(join("",reverse(unpack "(A2)*", $peer->{aesChannels})));
+			Log3($hash,1,"HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
+			for (my $chan = 0; $chan < 60; $chan++) {
+				if ($aesChannels & (1 << $chan)) {
+					Log3($hash,1,"HMUARTLGW ${name} Enabling AES for channel ${chan}");
+					$msg .= sprintf("%02x", $chan)
+				}
+			}
+		}
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
+		if ($peer->{operation} eq "-") {
+			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
+			delete($hash->{Peers}{$peer->{id}});
+		} else {
+			my $flags = hex($peer->{flags});
+
+			$msg = HMUARTLGW_APP_ADD_PEER .
+			       $peer->{id} .
+			       $peer->{kNo} .
+			       (($flags & 0x01) ? "01" : "00") . #AES
+			       (($flags & 0x02) ? "01" : "00");  #Wakeup
+		}
+	}
+
+	if ($msg) {
+		HMUARTLGW_send($hash, $msg, HMUARTLGW_DST_APP);
+		RemoveInternalTimer($hash);
+		InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+	}
+}
+
+sub HMUARTLGW_UpdatePeer($$) {
+	my ($hash, $peer) = @_;
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
+		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER;
+		HMUARTLGW_UpdatePeerReq($hash, $peer);
+	} else {
+		#enqueue for next update
+		push @{$hash->{Helper}{PeerQueue}}, $peer;
+	}
+}
+
+sub HMUARTLGW_UpdateQueuedPeer($) {
+	my ($hash) = @_;
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
+	    @{$hash->{Helper}{PeerQueue}}) {
+		return HMUARTLGW_UpdatePeer($hash, shift(@{$hash->{Helper}{PeerQueue}}));
+	}
+}
+
 sub HMUARTLGW_GetSetParameterReq($;$) {
 	my ($hash, $value) = @_;
 	my $name = $hash->{NAME};
@@ -365,8 +466,34 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 
 		HMUARTLGW_send($hash, $tmsg, HMUARTLGW_DST_OS);
 
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_FIRMWARE) {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_FIRMWARE, HMUARTLGW_DST_OS);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_A) {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_UNKNOWN_A, HMUARTLGW_DST_OS);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_9) {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_UNKNOWN_9 . "00", HMUARTLGW_DST_OS);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
+		my $peer = (keys(%{$hash->{Helper}{AssignedPeers}}))[0];
+		$hash->{Helper}{RemovePeer} = $peer;
+		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . $peer, HMUARTLGW_DST_APP);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS_AES) {
+		my $msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{RemovePeer};
+		for (my $chan = 0; $chan < 60; $chan++) {
+			$msg .= sprintf("%02x", $chan);
+		}
+
+		HMUARTLGW_send($hash, $msg, HMUARTLGW_DST_APP);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER ||
+	         $hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1 ||
+	         $hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2 ||
+	         $hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
+		HMUARTLGW_UpdatePeerReq($hash);
+		return;
+	} else {
+		return;
 	}
 
 	InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
@@ -382,7 +509,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	RemoveInternalTimer($hash);
 
-	Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack}") if ($ack);
+	Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
 		#Retry
@@ -413,20 +540,102 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_SET_TIME;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TIME) {
+		$hash->{DevState} = HMUARTLGW_STATE_GET_FIRMWARE;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_FIRMWARE) {
+		$hash->{DevState} = HMUARTLGW_STATE_UNKNOWN_A;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_A) {
+		$hash->{DevState} = HMUARTLGW_STATE_UNKNOWN_9;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_9) {
 		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
-		}
-		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+			my $peers = substr($msg, 8);
+			$hash->{AssignedPeerCnt} = 0;
+			while($peers) {
+				my $id = substr($peers, 0, 6, '');
+				my $aesChannels = substr($peers, 0, 16, '');
+				my $flags = substr($peers, 0, 2, '');
+				Log3($hash,1,"HMUARTLGW ${name} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
 
-	} else {
-		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+				$hash->{Helper}{AssignedPeers}{$id} = $aesChannels;
+				$hash->{AssignedPeerCnt}++;
+			}
+		}
+		if (%{$hash->{Helper}{AssignedPeers}}) {
+			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS;
+		} else {
+			delete($hash->{Helper}{AssignedPeers});
+			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		}
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			#040701010001
+			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
+		}
+		$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS_AES;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS_AES) {
+
+		delete($hash->{Helper}{AssignedPeers}{$hash->{Helper}{RemovePeer}});
+		delete($hash->{Helper}{RemovePeer});
+
+		if (%{$hash->{Helper}{AssignedPeers}}) {
+			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS
+		} else {
+			delete($hash->{Helper}{AssignedPeers});
+			$hash->{DevState} = HMUARTLGW_STATE_RUNNING
+		}
 	}
 
-	#HM-MOD-UART doesn't seem to provide a way to read the type...
-	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING && $hash->{DevType} eq "UART") {
-		readingsSingleUpdate($hash, "D-type", "HM-MOD-UART", 1);
+	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
+	    $oldState != HMUARTLGW_STATE_RUNNING &&
+	    (!$hash->{OneParameterOnly})) {
+		#Init sequence over, add known peers
+		foreach my $peer (keys(%{$hash->{Peers}})) {
+
+		if ($modules{CUL_HM}{defptr}{$peer} &&
+		    $modules{CUL_HM}{defptr}{$peer}{helper}{io}{newChn} ){
+			my ($id, $flags, $kNo, $aesChannels) = split(/,/, $modules{CUL_HM}{defptr}{$peer}{helper}{io}{newChn});
+			my $peer = {
+				id => substr($id, 1),
+				operation => substr($id, 0, 1),
+				flags => $flags,
+				kNo => $kNo,
+				aesChannels => $aesChannels,
+			};
+			HMUARTLGW_UpdatePeer($hash, $peer);
+		}
+		}
+	}
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			#040701010002fffffffffffffff9
+			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
+			$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
+		}
+		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
+		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES2;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
+		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
+			$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
+		}
+
+		delete($hash->{Helper}{UpdatePeer});
+
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 	}
 
 	#Don't continue in state-machine if only one parameter should be
@@ -437,11 +646,12 @@ sub HMUARTLGW_GetSetParameters($;$)
 	    $oldState != HMUARTLGW_STATE_SET_HMID) {
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		delete($hash->{OneParameterOnly});
-		return;
 	}
 
 	if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
 		HMUARTLGW_GetSetParameterReq($hash);
+	} else {
+		HMUARTLGW_UpdateQueuedPeer($hash);
 	}
 }
 
@@ -535,6 +745,8 @@ sub HMUARTLGW_Read($)
 
 	$buf = HMUARTLGW_decrypt($hash, $buf) if ($hash->{crypto});
 
+	#Log3($hash,1,"HMUARTLGW ${name} read (".length($buf)."): ".unpack("H*", $buf));
+
 	my $p = pack("H*", $hash->{PARTIAL}) . $buf;
 	$hash->{PARTIAL} .= unpack("H*", $buf);
 
@@ -565,7 +777,10 @@ sub HMUARTLGW_Read($)
 				$unescape_next = 1;
 				next;
 			}
-			$byte |= 0x80 if ($unescape_next);
+			if ($unescape_next) {
+				$byte = chr(ord($byte)|0x80);
+				$unescape_next = 0;
+			}
 			$unescaped .= $byte;
 		}
 
@@ -573,7 +788,12 @@ sub HMUARTLGW_Read($)
 
 		(my $len) = unpack("n", substr($unescaped, 0, 2));
 
-		next if (length($unescaped) != $len + 4); #short packet?
+		if (length($unescaped) > $len + 4) {
+			Log3($hash, 1, "HMUARTLGW ${name} packet with wrong length received: ".length($unescaped).", should: ".($len + 4).": fd".unpack("H*", $unescaped));
+			next;
+		}
+
+		next if (length($unescaped) < $len + 4); #short read
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
 		if ($crc != 0x0000) {
@@ -601,6 +821,23 @@ sub HMUARTLGW_Write($$$)
 	my $name = $hash->{NAME};
 
 	Log3($hash,1,"HMUARTLGW ${name} write: ${fn} ${msg}");
+
+	if($msg =~ m /init:(......)/){
+		my $dst = $1;
+		if ($modules{CUL_HM}{defptr}{$dst} &&
+		    $modules{CUL_HM}{defptr}{$dst}{helper}{io}{newChn} ){
+			my ($id, $flags, $kNo, $aesChannels) = split(/,/, $modules{CUL_HM}{defptr}{$dst}{helper}{io}{newChn});
+			my $peer = {
+				id => substr($id, 1),
+				operation => substr($id, 0, 1),
+				flags => $flags,
+				kNo => $kNo,
+				aesChannels => $aesChannels,
+			};
+			HMUARTLGW_UpdatePeer($hash, $peer);
+		}
+		return;
+	}
 
 	return;
 }
@@ -649,7 +886,7 @@ sub HMUARTLGW_CheckCmdResp($)
 
 	RemoveInternalTimer($hash);
 	if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
-		Log3($hash, 1, "HMUARTLGW ${name} did not respond after 5s, reopening");
+		Log3($hash, 1, "HMUARTLGW ${name} did not respond after 1s, reopening");
 		HMUARTLGW_Reopen($hash);
 	}
 
@@ -774,25 +1011,20 @@ sub HMUARTLGW_encrypt($$)
 	my $ks = pack("H*", $hash->{crypto}{encrypt}{keystream});
 	my $ct = pack("H*", $hash->{crypto}{encrypt}{ciphertext});
 
-	while($plaintext) {
-		if($ks) {
+	while(length($plaintext)) {
+		if(length($ks)) {
 			my $len = length($plaintext);
 
-			if (length($ks) < $len) {
-				$len = length($ks);
-			}
+			$len = length($ks) if (length($ks) < $len);
 
-			my $ppart = substr($plaintext, 0, $len);
-			my $kpart = substr($ks, 0, $len);
-
-			$plaintext = substr($plaintext, $len);
-			$ks = substr($ks, $len);
+			my $ppart = substr($plaintext, 0, $len, '');
+			my $kpart = substr($ks, 0, $len, '');
 
 			$ct .= $ppart ^ $kpart;
 
 			$ciphertext .= $ppart ^ $kpart;
 		} else {
-			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct)) if (length($ct) != 16);
+			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct).", ".length($ks)) if (length($ct) != 16);
 			$ks = $hash->{crypto}{cipher}->encrypt($ct);
 			$ct='';
 		}
@@ -806,40 +1038,35 @@ sub HMUARTLGW_encrypt($$)
 
 sub HMUARTLGW_decrypt($$)
 {
-        my ($hash, $ciphertext) = @_;
-        my $plaintext = '';
+	my ($hash, $ciphertext) = @_;
+	my $plaintext = '';
 
 	my $ks = pack("H*", $hash->{crypto}{decrypt}{keystream});
 	my $ct = pack("H*", $hash->{crypto}{decrypt}{ciphertext});
 
-        while($ciphertext) {
-                if($ks) {
-                        my $len = length($ciphertext);
+	while(length($ciphertext)) {
+		if(length($ks)) {
+			my $len = length($ciphertext);
 
-                        if (length($ks) < $len) {
-                                $len = length($ks);
-                        }
+			$len = length($ks) if (length($ks) < $len);
 
-                        my $cpart = substr($ciphertext, 0, $len);
-                        my $kpart = substr($ks, 0, $len);
+			my $cpart = substr($ciphertext, 0, $len, '');
+			my $kpart = substr($ks, 0, $len, '');
 
-                        $ciphertext = substr($ciphertext, $len);
-                        $ks = substr($ks, $len);
+			$ct .= $cpart;
 
-                        $ct .= $cpart;
-
-                        $plaintext .= $cpart ^ $kpart;
-                } else {
-			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct)) if (length($ct) != 16);
-                        $ks = $hash->{crypto}{cipher}->encrypt($ct);
-                        $ct='';
-                }
-        }
+			$plaintext .= $cpart ^ $kpart;
+		} else {
+			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct).", ".length($ks)) if (length($ct) != 16);
+			$ks = $hash->{crypto}{cipher}->encrypt($ct);
+			$ct='';
+		}
+	}
 
 	$hash->{crypto}{decrypt}{keystream} = unpack("H*", $ks);
 	$hash->{crypto}{decrypt}{ciphertext} = unpack("H*", $ct);
 
-        $plaintext;
+	$plaintext;
 }
 
 1;
