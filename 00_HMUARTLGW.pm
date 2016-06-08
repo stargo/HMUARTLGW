@@ -11,6 +11,7 @@ use constant {
 	HMUARTLGW_OS_GET_FIRMWARE          => "02",
 	HMUARTLGW_OS_CHANGE_APP            => "03",
 	HMUARTLGW_OS_ACK                   => "04",
+	HMUARTLGW_OS_UPDATE_FIRMWARE       => "05",
 	HMUARTLGW_OS_UNSOL_CREDITS         => "05",
 	HMUARTLGW_OS_NORMAL_MODE           => "06",
 	HMUARTLGW_OS_UPDATE_MODE           => "07",
@@ -85,7 +86,6 @@ sub HMUARTLGW_Initialize($)
 	my ($hash) = @_;
 
 	require "$attr{global}{modpath}/FHEM/DevIo.pm";
-
 
 	$hash->{ReadyFn}   = "HMUARTLGW_Ready";
 	$hash->{ReadFn}    = "HMUARTLGW_Read";
@@ -177,7 +177,10 @@ sub HMUARTLGW_Define($$)
 	} else {
 		$dev .= "\@115200";
 		$hash->{DevType} = "UART";
-		readingsSingleUpdate($hash, "D-type", "HM-MOD-UART", 1);
+		readingsBeginUpdate($hash);
+		delete($hash->{READINGS}{"D-LANfirmware"});
+		readingsBulkUpdate($hash, "D-type", "HM-MOD-UART");
+		readingsEndUpdate($hash, 1);
 	}
 
 	$hash->{DeviceName} = $dev;
@@ -258,6 +261,7 @@ sub HMUARTLGW_LGW_Init($)
 			if ($hash->{DevType} eq "LGW") {
 				readingsBeginUpdate($hash);
 				readingsBulkUpdate($hash, "D-type", $2);
+				readingsBulkUpdate($hash, "D-LANfirmware", $3);
 				readingsBulkUpdate($hash, "D-serial", $4);
 				readingsEndUpdate($hash, 1);
 			}
@@ -594,10 +598,10 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_FIRMWARE) {
 		if ($ack eq "02") { #?
-			my $fw = hex(substr($msg, 4, 2)).".".
-			         hex(substr($msg, 6, 4)).".".
-			         hex(substr($msg, 10, 2));
-			$hash->{FW} = hex((substr($msg, 4, 8)));
+			my $fw = hex(substr($msg, 10, 2)).".".
+			         hex(substr($msg, 12, 2)).".".
+			         hex(substr($msg, 14, 2));
+			$hash->{FW} = hex((substr($msg, 10, 6)));
 			readingsSingleUpdate($hash, "D-firmware", $fw, 1);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_GET_SERIAL;
@@ -823,6 +827,7 @@ sub HMUARTLGW_Parse($$$)
 			} elsif ($ack eq HMUARTLGW_ACK_WITH_RESPONSE_AES_KO) {
 				if ($oldMsg) {
 					#Need to produce our own "failed" challenge
+					my %addvals = ();
 					my $m = substr($oldMsg, 6, 2) .
 					        "A0" .
 					        substr($oldMsg, 10, 2) .
@@ -1012,7 +1017,7 @@ sub HMUARTLGW_Write($$$)
 		    defined($hash->{Peers}{$dst})){
 			# Acks are generally send by HMUARTLGW autonomously
 			# Special
-			Log3($hash, 1, "HMUARTLGW: Skip ACK");
+			Log3($hash, 5, "HMUARTLGW: Skip ACK");
 			return;
 		}
 
@@ -1029,7 +1034,7 @@ sub HMUARTLGW_Write($$$)
 
 		my $cmd = HMUARTLGW_APP_SEND . "0000";
 
-		if ($hash->{FW} < 0x01000401) {
+		if ($hash->{FW} > 0x010006) { #TODO: Find real version which adds this
 			$cmd .= ((hex(substr($msg, 6, 2)) & 0x10) ? "01" : "00");
 		}
 
