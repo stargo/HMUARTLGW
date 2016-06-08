@@ -37,7 +37,7 @@ use constant {
 
 	HMUARTLGW_ACK                      => "01",
 	HMUARTLGW_ACK_WITH_RESPONSE        => "03",
-	HMUARTLGW_ACK_NO_CREDITS           => "05",
+	HMUARTLGW_ACK_ENOCREDITS           => "05",
 	HMUARTLGW_ACK_WITH_DATA            => "07",
 	HMUARTLGW_ACK_EINPROGRESS          => "08",
 	HMUARTLGW_ACK_WITH_RESPONSE_AES_OK => "0c",
@@ -902,7 +902,7 @@ sub HMUARTLGW_Parse($$$)
 					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
 				}
 				return;
-			} elsif ($ack eq HMUARTLGW_ACK_NO_CREDITS) {
+			} elsif ($ack eq HMUARTLGW_ACK_ENOCREDITS) {
 				Log3($hash, 1, "HMUARTLGW ${name} IO in overload!");
 			}
 
