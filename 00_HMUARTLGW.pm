@@ -108,6 +108,7 @@ sub HMUARTLGW_Initialize($)
 	$hash->{AttrList}= "hmId " .
 	                   "lgwPw " .
 	                   "hmKey hmKey2 " .
+			   "dutyCycle:1,0 " .
 	                   $readingFnAttributes;
 }
 
@@ -551,7 +552,11 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_UNKNOWN_A . "00", HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CREDITS) {
-		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . "01", HMUARTLGW_DST_OS);
+		my $dutyCycle = AttrVal($name, "dutyCycle", 1);
+
+		$dutyCycle = $value if (defined($value));
+
+		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . sprintf("%02x", $dutyCycle), HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
 		my $key = HMUARTLGW_getAesKey($hash, 0);
@@ -1254,7 +1259,7 @@ sub HMUARTLGW_Attr(@)
 			HMUARTLGW_Reopen($hash);
 		}
 	} elsif ($aName =~ m/^hmKey(.?)$/) {
-		if ($cmd eq "set"){
+		if ($cmd eq "set") {
 			my $kNo = 1;
 			$kNo = $1 if ($1);
 			my ($no,$val) = (sprintf("%02X",$kNo),$aVal);
@@ -1272,6 +1277,17 @@ sub HMUARTLGW_Attr(@)
 			delete $attr{$name}{$aName};
 		}
 		HMUARTLGW_writeAesKey($name);
+	} elsif ($aName eq "dutyCycle") {
+		my $dutyCycle = 1;
+		if ($cmd eq "set") {
+			return "wrong syntax: dutyCycle must be 1 or 0"
+			    if ($aVal !~ m/^[01]$/);
+			$dutyCycle = $aVal;
+		}
+
+		$hash->{Helper}{OneParameterOnly} = 1;
+		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
+		HMUARTLGW_GetSetParameterReq($hash, $dutyCycle);
 	}
 
 	return $retVal;
@@ -1463,3 +1479,68 @@ sub HMUARTLGW_decrypt($$)
 }
 
 1;
+
+=pod
+=begin html
+
+<a name="HMLAN"></a>
+<h3>HMLAN</h3>
+<ul>
+  The HMLAN is the fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
+  (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART) which
+  is part of the HomeMatic Wireless module for the Raspberry Pi (HM-MOD-RPI-PCB).
+
+  <a name="HMUARTLGHW_define"></a>
+  <b>Define</b>
+  <ul>
+    <code>define &lt;name&gt; HMUARTLGW &lt;device&gt;</code><br><br>
+    &lt;device&gt; specifies the serial port to communicate with when using an
+    HM-MOD-UART, the baud-rate is fixed at 115200 so does not have to be specified.<br>
+    If using a LAN Gateway, &lt;device&gt; specifies the IP address of the Gateway,
+    optionally followed by : and the port number of the BidCoS-port (default
+    when not specified: 2000).
+    <br><br>
+    Example:<br>
+    <ul>
+      <code>define myHmUART HMUARTLGW /dev/ttyAMA0</code><br>
+      <code>define myHmLGW HMUARTLGW 192.168.42.23</code><br>
+    </ul>
+  </ul>
+  <br>
+  <a name="HMUARTLGW_set"></a>
+  <p><b>Set</b></p>
+  <ul>
+    <li><b>hmPairForSec</b><br>
+        XXX
+        </li><br>
+    <li><b>hmPairSerial</b><br>
+        XXX
+        </li><br>
+    <li><b>reopen</b><br>
+        Reopens the connection to the device and reinitializes it.
+        </li><br>
+    <li><b>raw &lt;rawmsg&gt;</b><br>
+        Sends a raw message.
+        </li><br>
+  </ul>
+  <br>
+  <b>Get</b> <ul>N/A</ul><br>
+  <a name="HMUARTLGW_attr"></a>
+  <b>Attributes</b>
+  <ul>
+    <li><b>hmId</b><br>
+        XXX
+        </li><br>
+    <li><b>hmKey</b>, <b>hmKey2</b><br>
+        XXX
+        </li><br>
+    <li><b>dutyCycle</b><br>
+        XXXX
+        </li><br>
+  </ul>
+  <br>
+
+</ul>
+
+=end html
+=cut
