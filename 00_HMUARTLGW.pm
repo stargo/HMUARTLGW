@@ -948,7 +948,7 @@ sub HMUARTLGW_Parse($$$)
 				Dispatch($hash, $dmsg, \%addvals);
 			}
 
-			# HMLAN sends ACK for flag 'A0' but not for 'A4'(config mode)-
+			# HMUARTLGW sends ACK for flag 'A0' but not for 'A4'(config mode)-
 			# we ack ourself an long as logic is uncertain - also possible is 'A6' for RHS
 			if (hex($flags) & 0xA4 == 0xA4 && $hash->{owner} eq $dst) {
 				Log3($hash, 1 ,"HMUARTLGW: $name ACK config");
@@ -1483,10 +1483,10 @@ sub HMUARTLGW_decrypt($$)
 =pod
 =begin html
 
-<a name="HMLAN"></a>
-<h3>HMLAN</h3>
+<a name="HMUARTLGW"></a>
+<h3>HMUARTLGW</h3>
 <ul>
-  The HMLAN is the fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
+  The HMUARTLGW is the fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
   (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART) which
   is part of the HomeMatic Wireless module for the Raspberry Pi (HM-MOD-RPI-PCB).
 
