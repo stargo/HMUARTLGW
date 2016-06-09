@@ -819,7 +819,7 @@ sub HMUARTLGW_Parse($$$)
 				} else {
 					Log3($hash,1,"HMUARTLGW ${name} failed to enter App!");
 				}
-			} else {
+			} elsif ($hash->{DevState} > HMUARTLGW_STATE_ENTER_APP) {
 				Log3($hash,1,"HMUARTLGW ${name} unexpected info about ${running} received (module crashed?), reopening");
 				HMUARTLGW_Reopen($hash);
 			}
