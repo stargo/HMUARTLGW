@@ -196,30 +196,9 @@ sub HMUARTLGW_Define($$)
 	return DevIo_OpenDev($hash, 0, "HMUARTLGW_DoInit");
 }
 
-sub HMUARTLGW_Undefine($$)
+sub HMUARTLGW_Undefine($$;$)
 {
-	my ($hash, $name) = @_;
-
-	RemoveInternalTimer($hash);
-	RemoveInternalTimer("HMUARTLGW_CheckCredits:$name");
-	if ($hash->{keepAlive}) {
-		RemoveInternalTimer($hash->{keepAlive});
-		DevIo_CloseDev($hash->{keepAlive});
-		delete($attr{$hash->{keepAlive}->{NAME}});
-		delete($defs{$hash->{keepAlive}->{NAME}});
-		delete($hash->{keepAlive});
-		$devcount--;
-	}
-	DevIo_CloseDev($hash);
-}
-
-sub HMUARTLGW_Reopen($;$)
-{
-	my ($hash, $noclose) = @_;
-	$hash = $hash->{lgwHash} if ($hash->{lgwHash});
-	my $name = $hash->{NAME};
-
-	Log3($hash,1,"HMUARTLGW ${name} Reopen");
+	my ($hash, $name, $noclose) = @_;
 
 	RemoveInternalTimer($hash);
 	RemoveInternalTimer("HMUARTLGW_CheckCredits:$name");
@@ -233,6 +212,17 @@ sub HMUARTLGW_Reopen($;$)
 	}
 
 	DevIo_CloseDev($hash) if (!$noclose);
+}
+
+sub HMUARTLGW_Reopen($;$)
+{
+	my ($hash, $noclose) = @_;
+	$hash = $hash->{lgwHash} if ($hash->{lgwHash});
+	my $name = $hash->{NAME};
+
+	Log3($hash,1,"HMUARTLGW ${name} Reopen");
+
+	HMUARTLGW_Undefine($hash, $name, $noclose);
 
 	return DevIo_OpenDev($hash, 1, "HMUARTLGW_DoInit");
 }
