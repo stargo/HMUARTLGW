@@ -158,7 +158,8 @@ sub HMUARTLGW_DoInit($)
 		$defs{$keepAlive->{NAME}} = $keepAlive;
 
 		DevIo_CloseDev($keepAlive);
-		$keepAlive->{DeviceName} = $hash->{DEF}.":2001";
+		my ($ip, $port) = split(/:/, $hash->{DeviceName});
+		$keepAlive->{DeviceName} = "${ip}:" . ($port + 1);
 		DevIo_OpenDev($keepAlive, 0, "HMUARTLGW_DoInit");
 		$hash->{keepAlive} = $keepAlive;
 	}
@@ -182,11 +183,11 @@ sub HMUARTLGW_Define($$)
 
 	HMUARTLGW_Undefine($hash, $name);
 
-	if (!($dev=~ m/\//)) {
-		$dev .= ":2000";
+	if ($dev !~ m/\//) {
+		$dev .= ":2000" if ($dev !~ m/:/);
 		$hash->{DevType} = "LGW";
 	} else {
-		$dev .= "\@115200";
+		$dev .= "\@115200" if ($dev !~ m/\@/);
 		$hash->{DevType} = "UART";
 		readingsBeginUpdate($hash);
 		delete($hash->{READINGS}{"D-LANfirmware"});
@@ -1488,7 +1489,9 @@ sub HMUARTLGW_decrypt($$)
 <ul>
   The HMUARTLGW is the fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
   (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART) which
-  is part of the HomeMatic Wireless module for the Raspberry Pi (HM-MOD-RPI-PCB).
+  is part of the HomeMatic Wireless module for the Raspberry Pi (HM-MOD-RPI-PCB).<br>
+
+  <br><br>
 
   <a name="HMUARTLGHW_define"></a>
   <b>Define</b>
@@ -1510,17 +1513,14 @@ sub HMUARTLGW_decrypt($$)
   <a name="HMUARTLGW_set"></a>
   <p><b>Set</b></p>
   <ul>
-    <li><b>hmPairForSec</b><br>
+    <li>hmPairForSec<br>
         XXX
         </li><br>
-    <li><b>hmPairSerial</b><br>
+    <li>hmPairSerial<br>
         XXX
         </li><br>
-    <li><b>reopen</b><br>
+    <li>reopen<br>
         Reopens the connection to the device and reinitializes it.
-        </li><br>
-    <li><b>raw &lt;rawmsg&gt;</b><br>
-        Sends a raw message.
         </li><br>
   </ul>
   <br>
@@ -1528,13 +1528,13 @@ sub HMUARTLGW_decrypt($$)
   <a name="HMUARTLGW_attr"></a>
   <b>Attributes</b>
   <ul>
-    <li><b>hmId</b><br>
+    <li>hmId<br>
         XXX
         </li><br>
-    <li><b>hmKey</b>, <b>hmKey2</b><br>
+    <li>hmKey, hmKey2<br>
         XXX
         </li><br>
-    <li><b>dutyCycle</b><br>
+    <li>dutyCycle<br>
         XXXX
         </li><br>
   </ul>
