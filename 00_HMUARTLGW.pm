@@ -112,6 +112,7 @@ sub HMUARTLGW_Initialize($)
 }
 
 sub HMUARTLGW_getAesKey($$);
+sub HMUARTLGW_updateMsgLoad($$);
 sub HMUARTLGW_Read($);
 sub HMUARTLGW_send($$$);
 sub HMUARTLGW_send_frame($$);
@@ -134,6 +135,7 @@ sub HMUARTLGW_DoInit($)
 	delete($hash->{FW});
 	delete($hash->{owner});
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
+	$hash->{XmitOpen} = 0;
 
 	$hash->{LGW_Init} = 1 if ($hash->{DevType} =~ m/^LGW/);
 
@@ -703,7 +705,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		}
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
 		if ($ack eq "02") { #?
-			$hash->{msgLoadCurrent} = int((hex(substr($msg, 4)) + 1) / 2);
+			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 	}
@@ -841,7 +843,7 @@ sub HMUARTLGW_Parse($$$)
 				}
 			}
 		} elsif ($msg =~ m/^05(..)$/) {
-			$hash->{msgLoadCurrent} = int((hex($1) + 1) / 2);
+			HMUARTLGW_updateMsgLoad($hash, hex($1));
 		}
 	} elsif ($dst == HMUARTLGW_DST_APP) {
 
@@ -1307,6 +1309,17 @@ sub HMUARTLGW_writeAesKey($) {
 	HMUARTLGW_SendPendingCmd($hash);
 }
 
+sub HMUARTLGW_updateMsgLoad($$) {
+	my ($hash, $load) = @_;
+
+	if ($load >= 199) {
+		$hash->{XmitOpen} = 0;
+	} else {
+		$hash->{XmitOpen} = 1;
+	}
+	$hash->{msgLoadCurrent} = $load;
+}
+
 sub HMUARTLGW_send($$$)
 {
 	my ($hash, $msg, $dst) = @_;
@@ -1406,7 +1419,6 @@ sub HMUARTLGW_encrypt($$)
 
 			$ciphertext .= $ppart ^ $kpart;
 		} else {
-			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct).", ".length($ks)) if (length($ct) != 16);
 			$ks = $hash->{crypto}{cipher}->encrypt($ct);
 			$ct='';
 		}
@@ -1439,7 +1451,6 @@ sub HMUARTLGW_decrypt($$)
 
 			$plaintext .= $cpart ^ $kpart;
 		} else {
-			Log3($hash,1,"HMUARTLGW ${name} invalid ciphertext len: ".length($ct).", ".length($ks)) if (length($ct) != 16);
 			$ks = $hash->{crypto}{cipher}->encrypt($ct);
 			$ct='';
 		}
