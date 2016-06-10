@@ -581,8 +581,7 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_CURRENT_KEY . ($key?$key:"00"), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
-		#my $key = HMUARTLGW_getAesKeys($hash);
-		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"), HMUARTLGW_DST_APP);
+		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . "00", HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
@@ -683,7 +682,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
 		if (!@{$hash->{Helper}{AESKeyQueue}}) {
-			$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
+			$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
@@ -792,10 +791,12 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	#Don't continue in state-machine if only one parameter should be
 	#set/queried, SET_HMID is special, as we have to query it again
-	#to update readings.
+	#to update readings. SET_CURRENT_KEY is always followed by
+	#SET_TEMP_KEY
 	if ($hash->{Helper}{OneParameterOnly} &&
 	    $oldState != $hash->{DevState} &&
-	    $oldState != HMUARTLGW_STATE_SET_HMID) {
+	    $oldState != HMUARTLGW_STATE_SET_HMID &&
+	    $oldState != HMUARTLGW_STATE_SET_CURRENT_KEY) {
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		delete($hash->{Helper}{OneParameterOnly});
 	}
