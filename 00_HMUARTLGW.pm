@@ -1,10 +1,15 @@
 ##############################################
 # $Id$
+package main;
 
-use Crypt::Rijndael;
+use strict;
+use warnings;
+
 use Digest::MD5;
 use Time::HiRes qw(gettimeofday time);
 use Time::Local;
+eval "use Crypt::Rijndael";
+my $cryptFunc = ($@)?0:1;
 
 use constant {
 	HMUARTLGW_OS_GET_APP               => "00",
@@ -17,14 +22,14 @@ use constant {
 	HMUARTLGW_OS_UPDATE_MODE           => "07",
 	HMUARTLGW_OS_GET_CREDITS           => "08",
 	HMUARTLGW_OS_ENABLE_CREDITS        => "09",
-	HMUARTLGW_OS_UNKNOWN_A             => "0A",
+	HMUARTLGW_OS_ENABLE_CSMACA         => "0A",
 	HMUARTLGW_OS_GET_SERIAL            => "0B",
 	HMUARTLGW_OS_SET_TIME              => "0E",
 
 	HMUARTLGW_APP_SET_HMID             => "00",
 	HMUARTLGW_APP_GET_HMID             => "01",
 	HMUARTLGW_APP_SEND                 => "02",
-	HMUARTLGW_APP_SET_CURRENT_KEY      => "03", #key index, 00 when no key
+	HMUARTLGW_APP_SET_CURRENT_KEY      => "03", #key index, 00x17 when no key
 	HMUARTLGW_APP_ACK                  => "04",
 	HMUARTLGW_APP_RECV                 => "05",
 	HMUARTLGW_APP_ADD_PEER             => "06",
@@ -32,17 +37,20 @@ use constant {
 	HMUARTLGW_APP_GET_PEERS            => "08",
 	HMUARTLGW_APP_PEER_ADD_AES         => "09",
 	HMUARTLGW_APP_PEER_REMOVE_AES      => "0A",
-	HMUARTLGW_APP_SET_TEMP_KEY         => "0F", #key index
+	HMUARTLGW_APP_SET_TEMP_KEY         => "0B", #key index, 00x17 when no key
+	HMUARTLGW_APP_SET_PREVIOUS_KEY     => "0F", #key index, 00x17 when no key
 	HMUARTLGW_APP_DEFAULT_HMID         => "10",
 
 	HMUARTLGW_ACK_NACK                 => "00",
 	HMUARTLGW_ACK                      => "01",
 	HMUARTLGW_ACK_WITH_RESPONSE        => "03",
+	HMUARTLGW_ACK_EUNKNOWN             => "04",
 	HMUARTLGW_ACK_ENOCREDITS           => "05",
+	HMUARTLGW_ACK_ECSMACA              => "06",
 	HMUARTLGW_ACK_WITH_DATA            => "07",
 	HMUARTLGW_ACK_EINPROGRESS          => "08",
-	HMUARTLGW_ACK_WITH_RESPONSE_AES_OK => "0c",
-	HMUARTLGW_ACK_WITH_RESPONSE_AES_KO => "0d",
+	HMUARTLGW_ACK_WITH_RESPONSE_AES_OK => "0C",
+	HMUARTLGW_ACK_WITH_RESPONSE_AES_KO => "0D",
 	HMUARTLGW_RECV_RESP                => "01",
 	HMUARTLGW_RECV_RESP_WITH_AES_OK    => "02",
 	HMUARTLGW_RECV_RESP_WITH_AES_KO    => "03",
@@ -62,13 +70,14 @@ use constant {
 	HMUARTLGW_STATE_GET_DEFAULT_HMID   => 7,
 	HMUARTLGW_STATE_GET_PEERS          => 8,
 	HMUARTLGW_STATE_GET_FIRMWARE       => 9,
-	HMUARTLGW_STATE_UNKNOWN_A          => 10,
+	HMUARTLGW_STATE_ENABLE_CSMACA      => 10,
 	HMUARTLGW_STATE_ENABLE_CREDITS     => 11,
 	HMUARTLGW_STATE_CLEAR_PEERS        => 12,
 	HMUARTLGW_STATE_CLEAR_PEERS_AES    => 13,
 	HMUARTLGW_STATE_GET_SERIAL         => 14,
 	HMUARTLGW_STATE_SET_CURRENT_KEY    => 15,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 16,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 16,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 17,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -113,9 +122,11 @@ sub HMUARTLGW_Initialize($)
 	                   "lgwPw " .
 	                   "hmKey hmKey2 hmKey3 " .
 			   "dutyCycle:1,0 " .
+			   "CSMA/CA:1,0 " .
 	                   $readingFnAttributes;
 }
 
+sub HMUARTLGW_SendPendingCmd($);
 sub HMUARTLGW_getAesKeys($);
 sub HMUARTLGW_updateMsgLoad($$);
 sub HMUARTLGW_Read($);
@@ -284,7 +295,11 @@ sub HMUARTLGW_LGW_Init($)
 
 			my $lgwPw = AttrVal($lgwName, "lgwPw", undef);
 
-			if ($lgwPw) {
+			if (!$cryptFunc) {
+				Log3($hash, 1, "HMUARTLGW ${name} wants to initiate encrypted communication, but Crypt::Rijndael is not installed.");
+			} elsif (!$lgwPw) {
+				Log3($hash, 1, "HMUARTLGW ${name} wants to initiate encrypted communication, but no lgwPw set!");
+			} else {
 				my($s,$us) = gettimeofday();
 				my $myiv = sprintf("%04x%06x%s", $s, ($us & 0xffffff), scalar(reverse(substr($2, 14)))); #FIXME...
 				my $key = Digest::MD5::md5($lgwPw);
@@ -295,19 +310,17 @@ sub HMUARTLGW_LGW_Init($)
 				$hash->{crypto}{decrypt}{ciphertext} = $myiv;
 
 				$msg = "V%02x,${myiv}\r\n";
-			} else {
-				Log3($hash,1,"HMUARTLGW ${name} wants to initiate encrypted communication, but no lgwPw set!");
 			}
 		} elsif ($line =~ m/^S(..),([^-]*)-/) {
 			$hash->{DEVCNT} = hex($1);
 			$hash->{CNT} = hex($1);
 
 			if ($2 eq "BidCoS") {
-				Log3($hash,1,"HMUARTLGW ${name} BidCoS-port opened");
+				Log3($hash, 3, "HMUARTLGW ${name} BidCoS-port opened");
 			} elsif ($2 eq "SysCom") {
-				Log3($hash,1,"HMUARTLGW ${name} KeepAlive-port opened");
+				Log3($hash, 3, "HMUARTLGW ${name} KeepAlive-port opened");
 			} else {
-				Log3($hash,1,"HMUARTLGW ${name} Unknown port identification received: ${2}, reopening");
+				Log3($hash, 1, "HMUARTLGW ${name} Unknown port identification received: ${2}, reopening");
 				HMUARTLGW_Reopen($hash);
 
 				return;
@@ -387,7 +400,7 @@ sub HMUARTLGW_CheckCredits($)
 	my $next = 15;
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
-		Log3($hash, 5, "HMUARTLGW ${name} checking credits");
+		Log3($hash, 5, "HMUARTLGW ${name} checking credits (from timer)");
 		$hash->{Helper}{OneParameterOnly} = 1;
 		$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
 		HMUARTLGW_GetSetParameterReq($hash);
@@ -408,23 +421,33 @@ sub HMUARTLGW_SendPendingCmd($)
 		my $cmd = $hash->{Helper}{PendingCMD}->[0];
 
 		if ($cmd eq "AESkeys") {
-			Log3($hash,1,"HMUARTLGW ${name} setting keys");
+			Log3($hash, 5, "HMUARTLGW ${name} setting keys");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_CURRENT_KEY;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} elsif ($cmd eq "Credits") {
-			Log3($hash, 1, "HMUARTLGW ${name} checking credits");
+			Log3($hash, 5, "HMUARTLGW ${name} checking credits (from send)");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} else {
-			Log3($hash, 1, "HMUARTLGW ${name} sending: ${cmd}");
+			#try for 3s, packet was not sent wirelessly yet!
+			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 30) {
+				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet");
+				shift(@{$hash->{Helper}{PendingCMD}});
+				delete($hash->{Helper}{RetryCnt});
+				#try next command
+				return HMUARTLGW_SendPendingCmd($hash);
+			} elsif ($hash->{Helper}{RetryCnt}) {
+				Log3($hash, 5, "HMUARTLGW ${name} Retry: ".$hash->{Helper}{RetryCnt});
+			}
+
 			$hash->{DevState} = HMUARTLGW_STATE_SEND;
 			HMUARTLGW_send($hash, $cmd, HMUARTLGW_DST_APP);
 			RemoveInternalTimer($hash);
-			InternalTimer(gettimeofday()+5, "HMUARTLGW_CheckCmdResp", $hash, 0);
+			InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
 		}
 	}
 }
@@ -435,7 +458,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 
 	$peer = $hash->{Helper}{UpdatePeer} if (!$peer);
 
-	Log3($hash,1,"HMUARTLGW ${name} UpdatePeerReq: ".$peer->{id}.", state ".$hash->{DevState});
+	Log3($hash, 4, "HMUARTLGW ${name} UpdatePeerReq: ".$peer->{id}.", state ".$hash->{DevState});
 
 	my $msg;
 
@@ -546,8 +569,8 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		my $tmsg = HMUARTLGW_OS_SET_TIME;
 
 		my $t = time();
-		my @l = localtime($time);
-		my $off = (timegm(@l) - timelocal(@l)) / 1800;
+		my @l = localtime($t);
+		my $off = (timegm(@l) - timelocal(@l)) / 3600;
 
 		$tmsg .= sprintf("%04x%02x", $t, $off);
 
@@ -559,8 +582,12 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_SERIAL) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_SERIAL, HMUARTLGW_DST_OS);
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_A) {
-		HMUARTLGW_send($hash, HMUARTLGW_OS_UNKNOWN_A . "00", HMUARTLGW_DST_OS);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CSMACA) {
+		my $csma_ca = AttrVal($name, "CSMA/CA", 1);
+
+		$csma_ca = $value if (defined($value));
+
+		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CSMACA . sprintf("%02x", $csma_ca), HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CREDITS) {
 		my $dutyCycle = AttrVal($name, "dutyCycle", 1);
@@ -570,18 +597,21 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . sprintf("%02x", $dutyCycle), HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
-		my $key;
+		#current key is key with highest idx
+		@{$hash->{Helper}{AESKeyQueue}} = HMUARTLGW_getAesKeys($hash);
+		my $key = shift(@{$hash->{Helper}{AESKeyQueue}});
+		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_CURRENT_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
-		if (!@{$hash->{Helper}{AESKeyQueue}}) {
-			@{$hash->{Helper}{AESKeyQueue}} = HMUARTLGW_getAesKeys($hash);
-			$key = shift(@{$hash->{Helper}{AESKeyQueue}});
-		} else {
-			$key = shift(@{$hash->{Helper}{AESKeyQueue}});
-		}
-		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_CURRENT_KEY . ($key?$key:"00"), HMUARTLGW_DST_APP);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_PREVIOUS_KEY) {
+		#previous key has second highest index
+		my $key = shift(@{$hash->{Helper}{AESKeyQueue}});
+		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_PREVIOUS_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . "00", HMUARTLGW_DST_APP);
+		#temp key has third highest index
+		my $key = shift(@{$hash->{Helper}{AESKeyQueue}});
+		delete($hash->{Helper}{AESKeyQueue});
+		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
@@ -604,7 +634,7 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		HMUARTLGW_UpdatePeerReq($hash);
 		return;
 
-	} elsif ($hash->{DevState} >= HMUARTLGW_STATE_GET_CREDITS) {
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_CREDITS, HMUARTLGW_DST_OS);
 
 	} else {
@@ -620,11 +650,11 @@ sub HMUARTLGW_GetSetParameters($;$)
 	my $name = $hash->{NAME};
 	my $oldState = $hash->{DevState};
 	my $hmId = AttrVal($name, "hmId", undef);
-	my $ack = substr($msg, 2, 2);
+	my $ack = substr($msg, 2, 2) if ($msg);
 
 	RemoveInternalTimer($hash);
 
-	Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
+	Log3($hash,1,"HMUARTLGW ${name} GetSet Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
 		#Retry
@@ -672,18 +702,19 @@ sub HMUARTLGW_GetSetParameters($;$)
 		if ($ack eq "02" && $hash->{DevType} eq "UART") { #?
 			readingsSingleUpdate($hash, "D-serialNr", pack("H*", substr($msg, 4)), 1);
 		}
-		$hash->{DevState} = HMUARTLGW_STATE_UNKNOWN_A;
+		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UNKNOWN_A) {
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CSMACA) {
 		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CREDITS) {
 		$hash->{DevState} = HMUARTLGW_STATE_SET_CURRENT_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
-		if (!@{$hash->{Helper}{AESKeyQueue}}) {
-			$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
-		}
+		$hash->{DevState} = HMUARTLGW_STATE_SET_PREVIOUS_KEY;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_PREVIOUS_KEY) {
+		$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
 		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
@@ -792,11 +823,12 @@ sub HMUARTLGW_GetSetParameters($;$)
 	#Don't continue in state-machine if only one parameter should be
 	#set/queried, SET_HMID is special, as we have to query it again
 	#to update readings. SET_CURRENT_KEY is always followed by
-	#SET_TEMP_KEY
+	#SET_PREVIOUS_KEY and SET_TEMP_KEY.
 	if ($hash->{Helper}{OneParameterOnly} &&
 	    $oldState != $hash->{DevState} &&
 	    $oldState != HMUARTLGW_STATE_SET_HMID &&
-	    $oldState != HMUARTLGW_STATE_SET_CURRENT_KEY) {
+	    $oldState != HMUARTLGW_STATE_SET_CURRENT_KEY &&
+	    $oldState != HMUARTLGW_STATE_SET_PREVIOUS_KEY) {
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		delete($hash->{Helper}{OneParameterOnly});
 	}
@@ -819,11 +851,12 @@ sub HMUARTLGW_Parse($$$)
 
 	$hash->{RAWMSG} = $msg;
 
-	Log3($hash,1,"HMUARTLGW ${name} parse ${msg}, dst ${dst}, state ".$hash->{DevState});
+	Log3($hash, 1, "HMUARTLGW ${name} recv: ".sprintf("%02X", $dst)." ${msg}, state ".$hash->{DevState})
+	     if ($msg !~ m/^05/ && $msg !~ m/^040[3C]/);
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
-		Log3($hash,1,"HMUARTLGW ${name} Ack with invalid counter received, dropping");
+		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping");
 		return;
 	}
 
@@ -876,15 +909,13 @@ sub HMUARTLGW_Parse($$$)
 
 		if ($msg =~ m/^04(..)(.*)$/) {
 			my $ack = $1;
-			Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
-
 			my $oldMsg;
 
 			if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
 				RemoveInternalTimer($hash);
 				$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
-				$oldMsg = shift @{$hash->{Helper}{PendingCMD}} if ($ack ne HMUARTLGW_ACK_EINPROGRESS);
+				$oldMsg = shift @{$hash->{Helper}{PendingCMD}};
 			}
 
 			if ($ack eq HMUARTLGW_ACK_WITH_RESPONSE ||
@@ -904,27 +935,53 @@ sub HMUARTLGW_Parse($$$)
 					        sprintf("%02X", hex(substr($2, 0, 2))*2);
 					my $dmsg = sprintf("A%02X%s:AESpending::${name}", length($m)/2, uc($m));
 
-					Log3($hash,1,"Dispatch: ${dmsg}");
+					Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 					Dispatch($hash, $dmsg, \%addvals);
 
-					my $dmsg = sprintf("A%02X%s:AESCom-fail::${name}", length($m)/2, uc($m));
+					$dmsg = sprintf("A%02X%s:AESCom-fail::${name}", length($m)/2, uc($m));
 
-					Log3($hash,1,"Dispatch: ${dmsg}");
+					Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 					Dispatch($hash, $dmsg, \%addvals);
 				}
 
-			} elsif ($ack eq HMUARTLGW_ACK_EINPROGRESS && @{$hash->{Helper}{PendingCMD}}) {
-				Log3($hash, 1, "HMUARTLGW ${name} IO currently unavailable, trying again in a bit");
+			} elsif ($ack eq HMUARTLGW_ACK_EINPROGRESS && $oldMsg) {
+				Log3($hash, 5, "HMUARTLGW ${name} IO currently busy, trying again in a bit");
 
 				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
+					$hash->{Helper}{RetryCnt}++;
 					RemoveInternalTimer($hash);
+					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
 					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_ENOCREDITS) {
 				Log3($hash, 1, "HMUARTLGW ${name} IO in overload!");
+				$hash->{XmitOpen} = 0;
+			} elsif ($ack eq HMUARTLGW_ACK_ECSMACA && $oldMsg) {
+				Log3($hash, 1, "HMUARTLGW ${name} can't send due to CSMA/CA, trying again in a bit");
+
+				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
+					$hash->{Helper}{RetryCnt}++;
+					RemoveInternalTimer($hash);
+					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
+					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+				}
+				return;
+			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
+				Log3($hash, 5, "HMUARTLGW ${name} can't send due to unknown problem, trying again in a bit");
+
+				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
+					$hash->{Helper}{RetryCnt}++;
+					RemoveInternalTimer($hash);
+					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
+					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+				}
+				return;
+			} else {
+				Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
 			}
 
+			delete($hash->{Helper}{RetryCnt});
 			HMUARTLGW_UpdateQueuedPeer($hash);
 			HMUARTLGW_SendPendingCmd($hash);
 		} elsif ($msg =~ m/^(05.*)$/) {
@@ -932,15 +989,13 @@ sub HMUARTLGW_Parse($$$)
 		}
 
 		if ($recv && $recv =~ m/^(..)(..)(..)(..)(..)(..)(..)(......)(......)(.*)$/) {
-			my ($type, $status, $kNo, $rssi, $mNr, $flags, $cmd, $src, $dst, $payload) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+			my ($type, $status, $info, $rssi, $mNr, $flags, $cmd, $src, $dst, $payload) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
-			$rssi = 0 - hex($rssi);
-			$kNo = sprintf("%02X", (hex($kNo) * 2));
-
-			Log3($hash,1,"HMUARTLGW ${name} recv ${type} ${status} kNo: ${kNo} rssi: ${rssi} msg: ${mNr} ${flags} ${cmd} ${src} ${dst} ${payload}");
+			Log3($hash, 1, "HMUARTLGW ${name} recv: 01 ${type} ${status} ${info} ${rssi} msg: ${mNr} ${flags} ${cmd} ${src} ${dst} ${payload}");
 
 			return if (!$hash->{Helper}{Initialized});
 
+			$rssi = 0 - hex($rssi);
 			$hash->{RSSI} = $rssi;
 			my %addvals = (RAWMSG => $msg, RSSI => $rssi);
 
@@ -949,7 +1004,8 @@ sub HMUARTLGW_Parse($$$)
 
 			if ($type eq HMUARTLGW_APP_ACK && $status eq HMUARTLGW_ACK_WITH_RESPONSE_AES_OK) {
 				#Fake AES challenge for CUL_HM
-				$c = "${mNr}A0${cmd}${src}${dst}04000000000000${kNo}";
+				my $kNo = sprintf("%02X", (hex($info) * 2));
+				my $c = "${mNr}A0${cmd}${src}${dst}04000000000000${kNo}";
 				$dmsg = sprintf("A%02X%s:AESpending:${rssi}:${name}", length($c)/2, uc($c));
 
 				$CULinfo = "AESCom-ok";
@@ -967,7 +1023,7 @@ sub HMUARTLGW_Parse($$$)
 			}
 
 			if ($dmsg) {
-				Log3($hash,1,"Dispatch: ${dmsg}");
+				Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 				Dispatch($hash, $dmsg, \%addvals);
 			}
 
@@ -975,15 +1031,17 @@ sub HMUARTLGW_Parse($$$)
 			# we ack ourself an long as logic is uncertain - also possible is 'A6' for RHS
 			if (hex($flags) & 0xA4 == 0xA4 && $hash->{owner} eq $dst) {
 				Log3($hash, 1 ,"HMUARTLGW: $name ACK config");
-				HMUARTLGW_Write($hash,undef, "As15".$mNo."8002".$dst.$src."00");
+				HMUARTLGW_Write($hash,undef, "As15".$mNr."8002".$dst.$src."00");
 			}
 
 			$dmsg = sprintf("A%02X%s:${CULinfo}:${rssi}:${name}", length($m)/2, uc($m));
 
-			Log3($hash,1,"Dispatch: ${dmsg}");
+			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 			Dispatch($hash, $dmsg, \%addvals);
 		}
 	}
+
+	return;
 }
 
 sub HMUARTLGW_Read($)
@@ -1015,7 +1073,7 @@ sub HMUARTLGW_Read($)
 
 	my $unprocessed;
 
-	while ($p =~ m/^\xfd/) {
+	while (defined($p) && $p =~ m/^\xfd/) {
 		$unprocessed = $p;
 
 		(undef, my $frame, $p) = split(/\xfd/, $unprocessed, 3);
@@ -1040,7 +1098,7 @@ sub HMUARTLGW_Read($)
 		(my $len) = unpack("n", substr($unescaped, 0, 2));
 
 		if (length($unescaped) > $len + 4) {
-			Log3($hash, 1, "HMUARTLGW ${name} frame with wrong length received: ".length($unescaped).", should: ".($len + 4).": fd".unpack("H*", $unescaped));
+			Log3($hash, 1, "HMUARTLGW ${name} frame with wrong length received: ".length($unescaped).", should: ".($len + 4).": FD".uc(unpack("H*", $unescaped)));
 			next;
 		}
 
@@ -1048,7 +1106,7 @@ sub HMUARTLGW_Read($)
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
 		if ($crc != 0x0000) {
-			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame!");
+			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame (FD".uc(unpack("H*", $unescaped)).")!");
 			undef($unprocessed);
 			next;
 		}
@@ -1058,12 +1116,16 @@ sub HMUARTLGW_Read($)
 		my $dst = ord(substr($unescaped, 2, 1));
 		$hash->{DEVCNT} = ord(substr($unescaped, 3, 1));
 
-		HMUARTLGW_Parse($hash, lc(unpack("H*", substr($unescaped, 4, -2))), $dst);
+		HMUARTLGW_Parse($hash, uc(unpack("H*", substr($unescaped, 4, -2))), $dst);
 
 		undef($unprocessed);
 	}
 
-	$hash->{PARTIAL} = unpack("H*", $unprocessed);
+	if (defined($unprocessed)) {
+		$hash->{PARTIAL} = unpack("H*", $unprocessed);
+	} else {
+		$hash->{PARTIAL} = '';
+	}
 }
 
 sub HMUARTLGW_Write($$$)
@@ -1314,6 +1376,17 @@ sub HMUARTLGW_Attr(@)
 		$hash->{Helper}{OneParameterOnly} = 1;
 		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
 		HMUARTLGW_GetSetParameterReq($hash, $dutyCycle);
+	} elsif ($aName eq "CSMA/CA") {
+		my $csma_ca = 1;
+		if ($cmd eq "set") {
+			return "wrong syntax: CSMA/CA must be 1 or 0"
+			    if ($aVal !~ m/^[01]$/);
+			$csma_ca = $aVal;
+		}
+
+		$hash->{Helper}{OneParameterOnly} = 1;
+		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
+		HMUARTLGW_GetSetParameterReq($hash, $csma_ca);
 	}
 
 	return $retVal;
@@ -1368,11 +1441,33 @@ sub HMUARTLGW_send($$$)
 	my ($hash, $msg, $dst) = @_;
 	my $name = $hash->{NAME};
 
-	Log3($hash,1,"HMUARTLGW ${name} encode ${msg}, dst ${dst}");
+	my $log;
+
+	if ($dst == HMUARTLGW_DST_APP && uc($msg) =~ m/^(02)(..)(..)(.*)$/) {
+		$log = "01 ${1} ${2} ${3} ";
+
+		my $m = $4;
+
+		if ($hash->{FW} > 0x010006) {
+			$log .= substr($m, 0, 2, '') . " ";
+		} else {
+			$log .= "XX ";
+		}
+
+		if ($m =~ m/^(..)(..)(..)(......)(......)(.*)$/) {
+			$log .= "msg: ${1} ${2} ${3} ${4} ${5} ${6}";
+		} else {
+			$log .= $m;
+		}
+	} else {
+		$log = sprintf("%02X", $dst). " ".uc($msg);
+	}
+
+	Log3($hash, 1, "HMUARTLGW ${name} send: ${log}");
 
 	$hash->{CNT} = ($hash->{CNT} + 1) & 0xff;
 
-	my $frame = pack("cnccH*", 0xfd,
+	my $frame = pack("CnCCH*", 0xfd,
 	                            (length($msg) / 2) + 2,
 	                            $dst,
 	                            $hash->{CNT},
@@ -1413,7 +1508,7 @@ sub HMUARTLGW_sendAscii($$)
 
 	$msg = sprintf($msg, $hash->{CNT});
 
-	Log3($hash,4,"HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
+	Log3($hash, 4, "HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
 	$msg = HMUARTLGW_encrypt($hash, $msg) if ($hash->{crypto} && !($msg =~ m/^V/));
 
 	$hash->{CNT} = ($hash->{CNT} + 1) & 0xff;
@@ -1513,9 +1608,10 @@ sub HMUARTLGW_decrypt($$)
 <a name="HMUARTLGW"></a>
 <h3>HMUARTLGW</h3>
 <ul>
-  The HMUARTLGW is the fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
-  (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART) which
-  is part of the HomeMatic Wireless module for the Raspberry Pi (HM-MOD-RPI-PCB).<br>
+  HMUARTLGW is the Fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
+  (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART), which
+  is part of the HomeMatic wireless module for the Raspberry Pi
+  (HM-MOD-RPI-PCB).<br>
 
   <br><br>
 
@@ -1523,13 +1619,17 @@ sub HMUARTLGW_decrypt($$)
   <b>Define</b>
   <ul>
     <code>define &lt;name&gt; HMUARTLGW &lt;device&gt;</code><br><br>
-    &lt;device&gt; specifies the serial port to communicate with when using an
-    HM-MOD-UART, the baud-rate is fixed at 115200 so does not have to be specified.<br>
-    If using a LAN Gateway, &lt;device&gt; specifies the IP address of the Gateway,
-    optionally followed by : and the port number of the BidCoS-port (default
-    when not specified: 2000).
+    The &lt;device&gt;-parameter depends on the device-type:
+    <ul>
+      <li>HM-MOD-UART: &lt;device&gt; specifies the serial port to communicate
+          with. The baud-rate is fixed at 115200 and does not need to be
+          specified.</li>
+      <li>HM-LGW-O-TW-W-EU: &lt;device&gt; specifies the IP address or hostname
+          of the gateway, optionally followed by : and the port number of the
+          BidCoS-port (default when not specified: 2000).</li>
+    </ul>
     <br><br>
-    Example:<br>
+    Examples:<br>
     <ul>
       <code>define myHmUART HMUARTLGW /dev/ttyAMA0</code><br>
       <code>define myHmLGW HMUARTLGW 192.168.42.23</code><br>
@@ -1539,29 +1639,43 @@ sub HMUARTLGW_decrypt($$)
   <a name="HMUARTLGW_set"></a>
   <p><b>Set</b></p>
   <ul>
-    <li>hmPairForSec<br>
-        XXX
-        </li><br>
-    <li>hmPairSerial<br>
-        XXX
-        </li><br>
+    <li><a href="#hmPairForSec">hmPairForSec</a></li>
+    <li><a href="#hmPairSerial">hmPairSerial</a></li>
     <li>reopen<br>
         Reopens the connection to the device and reinitializes it.
         </li><br>
   </ul>
   <br>
+  <a name="HMUARTLGW_get"></a>
   <b>Get</b> <ul>N/A</ul><br>
   <a name="HMUARTLGW_attr"></a>
   <b>Attributes</b>
   <ul>
-    <li>hmId<br>
-        XXX
-        </li><br>
-    <li>hmKey, hmKey2, hmKey3<br>
-        XXX
+    <li><a href="#hmId">hmId</a></li>
+    <li><a name="HMLANhmKey">hmKey</a></li>
+    <li><a name="HMLANhmKey2">hmKey2</a></li>
+    <li><a name="HMLANhmKey3">hmKey3</a></li>
+    <li>lgwPw<br>
+        AES password for the eQ-3 HomeMatic Wireless LAN Gateway. The default
+        password is printed on the back of the device (but can be changed by
+        the user). If AES communication is enabled on the LAN Gateway (default),
+        this attribute has to be set to the correct value or communication will
+        not be possible. In addition, the perl-module Crypt::Rijndael (which
+        provides the AES cipher) must be installed.
         </li><br>
     <li>dutyCycle<br>
-        XXXX
+        Enable or disable the duty-cycle check (1% rule) performed by the
+	wireless module.<br>
+        Disabling this might be illegal in your country, please check with local
+        regulations!<br>
+        Default: 1 (enabled)
+        </li><br>
+    <li>CSMA/CA<br>
+        Enable or disable CSMA/CA (Carrier sense multiple access with collision
+        avoidance), also known as listen-before-talk.
+        Disabling this might be illegal in your country, please check with local
+        regulations!<br>
+        Default: 1 (enabled)
         </li><br>
   </ul>
   <br>
