@@ -1,8 +1,38 @@
 Index: 10_CUL_HM.pm
 ===================================================================
---- 10_CUL_HM.pm	(revision 11608)
+--- 10_CUL_HM.pm	(revision 11641)
 +++ 10_CUL_HM.pm	(working copy)
-@@ -920,7 +920,7 @@
+@@ -288,8 +288,12 @@
+       $hash->{helper}{role}{vrt} = 1;
+       if($hash->{helper}{role}{dev}){
+         CUL_HM_UpdtCentral($name); # first update, then keys
+-        if(eval "defined(&HMLAN_writeAesKey)"){
+-          HMLAN_writeAesKey($_) foreach (split ",",AttrVal($name,"IOList",""));
++        foreach my $io (split ",",AttrVal($name,"IOList","")) {
++          if($defs{$io} && $defs{$io}->{TYPE} eq "HMLAN" && eval "defined(&HMLAN_writeAesKey)"){
++            HMLAN_writeAesKey($io);
++          } elsif ($defs{$io} && $defs{$io}->{TYPE} eq "HMUARTLGW") {
++            CallFn($io,"WriteFn",$defs{$io},undef,"writeAesKey:${io}");
++          }
+         }
+       }
+     }
+@@ -828,8 +832,12 @@
+       delete $attr{$name}{$attrName};
+     }
+     if ($init_done){
+-      if(eval "defined(&HMLAN_writeAesKey)"){
+-        HMLAN_writeAesKey($_) foreach (split ",",AttrVal($name,"IOList",""));
++      foreach my $io (split ",",AttrVal($name,"IOList","")) {
++        if($defs{$io} && $defs{$io}->{TYPE} eq "HMLAN" && eval "defined(&HMLAN_writeAesKey)"){
++          HMLAN_writeAesKey($io);
++        } elsif ($defs{$io} && $defs{$io}->{TYPE} eq "HMUARTLGW") {
++          CallFn($io,"WriteFn",$defs{$io},undef,"writeAesKey:${io}");
++        }
+       }
+     }
+     return $retVal;
+@@ -920,7 +928,7 @@
    if ((  $hash->{helper}{io}{newChn} ne $oldChn)
        && $hash->{IODev}
        && $hash->{IODev}->{TYPE}
@@ -11,7 +41,7 @@ Index: 10_CUL_HM.pm
      IOWrite($hash, "", "init:$p[0]");
    }
  }
-@@ -2768,7 +2768,7 @@
+@@ -2768,7 +2776,7 @@
    }
    if($rxt & 0x10 && $mhp->{devH}{helper}{prt}{sleeping}){ # lazy config
      if($mhp->{mFlgH} & 0x02                  #wakeup device
@@ -20,7 +50,7 @@ Index: 10_CUL_HM.pm
        $mhp->{devH}{helper}{io}{newCh} = 1 if ($mhp->{devH}{helper}{prt}{sProc} == 2);
        CUL_HM_appFromQ($mhp->{devN},"cf");# stack cmds if waiting
        $mhp->{devH}{helper}{prt}{sleeping} = 0;
-@@ -8248,7 +8248,7 @@
+@@ -8248,7 +8256,7 @@
    
    foreach my $ioN(split",",AttrVal($name,"IOList","")){# set parameter in IO
      next if (!$defs{$ioN});
@@ -29,7 +59,7 @@ Index: 10_CUL_HM.pm
      }
      elsif($defs{$ioN}{TYPE} eq "CUL"){
        CommandAttr(undef, "$ioN rfmode HomeMatic") 
-@@ -8344,7 +8344,7 @@
+@@ -8344,7 +8352,7 @@
        if (   $hash->{IODev} 
            && $hash->{IODev} ne $defs{$iom}
            && $hash->{IODev}->{TYPE}

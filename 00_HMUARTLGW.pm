@@ -1063,7 +1063,7 @@ sub HMUARTLGW_Write($$$)
 	my ($hash,$fn,$msg) = @_;
 	my $name = $hash->{NAME};
 
-	if($msg =~ m/init:(......)/){
+	if($msg =~ m/init:(......)/) {
 		my $dst = $1;
 		if ($modules{CUL_HM}{defptr}{$dst} &&
 		    $modules{CUL_HM}{defptr}{$dst}{helper}{io}{newChn}) {
@@ -1079,7 +1079,7 @@ sub HMUARTLGW_Write($$$)
 			HMUARTLGW_UpdatePeer($hash, $peer);
 		}
 		return;
-	} elsif ($msg =~ m/remove:(......)/){
+	} elsif ($msg =~ m/remove:(......)/) {
 		my $peer = {
 			id => $1,
 			operation => "-",
@@ -1101,6 +1101,9 @@ sub HMUARTLGW_Write($$$)
 			delete($hash->{Peers}{$peer->{id}});
 		}
 		HMUARTLGW_UpdatePeer($hash, $peer);
+		return;
+	} elsif ($msg =~ m/^writeAesKey:(.*)$/) {
+		HMUARTLGW_writeAesKey($1);
 		return;
 	} elsif (length($msg) > 21) {
 		my ($mtype,$src,$dst) = (substr($msg, 8, 2),
