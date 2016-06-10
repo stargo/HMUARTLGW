@@ -35,6 +35,7 @@ use constant {
 	HMUARTLGW_APP_SET_TEMP_KEY         => "0F", #key index
 	HMUARTLGW_APP_DEFAULT_HMID         => "10",
 
+	HMUARTLGW_ACK_NACK                 => "00",
 	HMUARTLGW_ACK                      => "01",
 	HMUARTLGW_ACK_WITH_RESPONSE        => "03",
 	HMUARTLGW_ACK_ENOCREDITS           => "05",
@@ -42,8 +43,11 @@ use constant {
 	HMUARTLGW_ACK_EINPROGRESS          => "08",
 	HMUARTLGW_ACK_WITH_RESPONSE_AES_OK => "0c",
 	HMUARTLGW_ACK_WITH_RESPONSE_AES_KO => "0d",
-	HMUARTLGW_RECV_WITH_AES_KO         => "03",
-	HMUARTLGW_RECV_WITH_AES_OK         => "12",
+	HMUARTLGW_RECV_RESP                => "01",
+	HMUARTLGW_RECV_RESP_WITH_AES_OK    => "02",
+	HMUARTLGW_RECV_RESP_WITH_AES_KO    => "03",
+	HMUARTLGW_RECV_TRIG                => "11",
+	HMUARTLGW_RECV_TRIG_WITH_AES_OK    => "12",
 
         HMUARTLGW_DST_OS                   => 0,
         HMUARTLGW_DST_APP                  => 1,
@@ -471,18 +475,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
-		if ($peer->{operation} eq "-") {
-			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
-			delete($hash->{Peers}{$peer->{id}});
-		} else {
-			my $flags = hex($peer->{flags});
-
-			$msg = HMUARTLGW_APP_ADD_PEER .
-			       $peer->{id} .
-			       $peer->{kNo} .
-			       (($flags & 0x01) ? "01" : "00") . #AES
-			       (($flags & 0x02) ? "01" : "00");  #Wakeup
-		}
+		$msg = HMUARTLGW_APP_GET_PEERS;
 	}
 
 	if ($msg) {
@@ -513,6 +506,23 @@ sub HMUARTLGW_UpdateQueuedPeer($) {
 	}
 }
 
+sub HMUARTLGW_ParsePeers($$) {
+	my ($hash, $msg) = @_;
+
+	my $peers = substr($msg, 8);
+	$hash->{AssignedPeerCnt} = 0;
+	delete($hash->{Helper}{AssignedPeers});
+	while($peers) {
+		my $id = substr($peers, 0, 6, '');
+		my $aesChannels = substr($peers, 0, 16, '');
+		my $flags = substr($peers, 0, 2, '');
+		Log3($hash,1,"HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
+
+		$hash->{Helper}{AssignedPeers}{$id} = $aesChannels;
+		$hash->{AssignedPeerCnt}++;
+	}
+}
+
 sub HMUARTLGW_GetSetParameterReq($;$) {
 	my ($hash, $value) = @_;
 	my $name = $hash->{NAME};
@@ -522,7 +532,7 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 	if ($hash->{DevState} == HMUARTLGW_STATE_SET_HMID) {
 		my $hmId = AttrVal($name, "hmId", undef);
 
-		$hmId = $value if ($value);
+		$hmId = $value if (defined($value));
 
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_HMID . $hmId, HMUARTLGW_DST_APP);
 
@@ -672,17 +682,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
-			my $peers = substr($msg, 8);
-			$hash->{AssignedPeerCnt} = 0;
-			while($peers) {
-				my $id = substr($peers, 0, 6, '');
-				my $aesChannels = substr($peers, 0, 16, '');
-				my $flags = substr($peers, 0, 2, '');
-				Log3($hash,1,"HMUARTLGW ${name} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
-
-				$hash->{Helper}{AssignedPeers}{$id} = $aesChannels;
-				$hash->{AssignedPeerCnt}++;
-			}
+			HMUARTLGW_ParsePeers($hash, $msg);
 		}
 		if (%{$hash->{Helper}{AssignedPeers}}) {
 			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS;
@@ -724,7 +724,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 			if ($modules{CUL_HM}{defptr}{$peer} &&
 			    $modules{CUL_HM}{defptr}{$peer}{helper}{io}{newChn}) {
 				my ($id, $flags, $kNo, $aesChannels) = split(/,/, $modules{CUL_HM}{defptr}{$peer}{helper}{io}{newChn});
-				my $peer = {
+				my $p = {
 					id => substr($id, 1),
 					operation => substr($id, 0, 1),
 					flags => $flags,
@@ -732,7 +732,14 @@ sub HMUARTLGW_GetSetParameters($;$)
 					aesChannels => $aesChannels,
 				};
 				#enqueue for later
-				push @{$hash->{Helper}{PeerQueue}}, $peer;
+				if ($p->{operation} eq "+") {
+					$hash->{Peers}{$peer} = "pending";
+					push @{$hash->{Helper}{PeerQueue}}, $p;
+				} else {
+					delete($hash->{Peers}{$peer});
+				}
+			} else {
+				delete($hash->{Peers}{$peer});
 			}
 		}
 
@@ -746,8 +753,6 @@ sub HMUARTLGW_GetSetParameters($;$)
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			#040701010002fffffffffffffff9
-			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
-			$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
 
@@ -755,12 +760,18 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES2;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
-		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+		$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = "assigned";
+		if (@{$hash->{Helper}{PeerQueue}}) {
+			#Still peers in queue, get current assigned peers
+			#only when queue is empty
+			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		} else {
+			$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
-			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
-			$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
+			HMUARTLGW_ParsePeers($hash, $msg);
 		}
 
 		delete($hash->{Helper}{UpdatePeer});
@@ -932,12 +943,13 @@ sub HMUARTLGW_Parse($$$)
 				$dmsg = sprintf("A%02X%s:AESpending:${rssi}:${name}", length($c)/2, uc($c));
 
 				$CULinfo = "AESCom-ok";
-			} elsif ($type eq HMUARTLGW_APP_RECV && $status eq HMUARTLGW_RECV_WITH_AES_OK) {
+			} elsif ($type eq HMUARTLGW_APP_RECV && ($status eq HMUARTLGW_RECV_RESP_WITH_AES_OK ||
+			                                         $status eq  HMUARTLGW_RECV_TRIG_WITH_AES_OK)) {
 				#Fake AES response for CUL_HM
 				$dmsg = sprintf("A%02X%s:AESpending:${rssi}:${name}", length($m)/2, uc($m));
 
 				$CULinfo = "AESCom-ok";
-			} elsif ($type eq HMUARTLGW_APP_RECV && $status eq HMUARTLGW_RECV_WITH_AES_KO) {
+			} elsif ($type eq HMUARTLGW_APP_RECV && $status eq HMUARTLGW_RECV_RESP_WITH_AES_KO) {
 				#Fake AES response for CUL_HM
 				$dmsg = sprintf("A%02X%s:AESpending:${rssi}:${name}", length($m)/2, uc($m));
 
