@@ -515,10 +515,10 @@ sub HMUARTLGW_ParsePeers($$) {
 	while($peers) {
 		my $id = substr($peers, 0, 6, '');
 		my $aesChannels = substr($peers, 0, 16, '');
-		my $flags = substr($peers, 0, 2, '');
-		Log3($hash,1,"HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
+		my $kNo= hex(substr($peers, 0, 2, ''));
+		Log3($hash,1,"HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, kNo: ${kNo}");
 
-		$hash->{Helper}{AssignedPeers}{$id} = $aesChannels;
+		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (kNo: ${kNo})";
 		$hash->{AssignedPeerCnt}++;
 	}
 }
@@ -753,6 +753,8 @@ sub HMUARTLGW_GetSetParameters($;$)
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			#040701010002fffffffffffffff9
+			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
+			$hash->{Helper}{AssignedPeers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
 
