@@ -111,12 +111,12 @@ sub HMUARTLGW_Initialize($)
 
 	$hash->{AttrList}= "hmId " .
 	                   "lgwPw " .
-	                   "hmKey hmKey2 " .
+	                   "hmKey hmKey2 hmKey3 " .
 			   "dutyCycle:1,0 " .
 	                   $readingFnAttributes;
 }
 
-sub HMUARTLGW_getAesKey($$);
+sub HMUARTLGW_getAesKeys($);
 sub HMUARTLGW_updateMsgLoad($$);
 sub HMUARTLGW_Read($);
 sub HMUARTLGW_send($$$);
@@ -570,11 +570,18 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . sprintf("%02x", $dutyCycle), HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
-		my $key = HMUARTLGW_getAesKey($hash, 0);
+		my $key;
+
+		if (!@{$hash->{Helper}{AESKeyQueue}}) {
+			@{$hash->{Helper}{AESKeyQueue}} = HMUARTLGW_getAesKeys($hash);
+			$key = shift(@{$hash->{Helper}{AESKeyQueue}});
+		} else {
+			$key = shift(@{$hash->{Helper}{AESKeyQueue}});
+		}
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_CURRENT_KEY . ($key?$key:"00"), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
-		my $key = HMUARTLGW_getAesKey($hash, 1);
+		#my $key = HMUARTLGW_getAesKeys($hash);
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
@@ -675,7 +682,9 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_SET_CURRENT_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
-		$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
+		if (!@{$hash->{Helper}{AESKeyQueue}}) {
+			$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
+		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
 		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
@@ -783,12 +792,10 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	#Don't continue in state-machine if only one parameter should be
 	#set/queried, SET_HMID is special, as we have to query it again
-	#to update readings. SET_CURRENT_KEY is always followed by
-	#SET_TEMP_KEY
+	#to update readings.
 	if ($hash->{Helper}{OneParameterOnly} &&
 	    $oldState != $hash->{DevState} &&
-	    $oldState != HMUARTLGW_STATE_SET_HMID &&
-	    $oldState != HMUARTLGW_STATE_SET_CURRENT_KEY) {
+	    $oldState != HMUARTLGW_STATE_SET_HMID) {
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		delete($hash->{Helper}{OneParameterOnly});
 	}
@@ -1311,9 +1318,10 @@ sub HMUARTLGW_Attr(@)
 	return $retVal;
 }
 
-sub HMUARTLGW_getAesKey($$) {
-	my ($hash, $num) = @_;
+sub HMUARTLGW_getAesKeys($) {
+	my ($hash) = @_;
 	my $name = $hash->{NAME};
+	my @k;
 
 	my %keys = ();
 	my $vccu = InternalVal($name,"owner_CCU",$name);
@@ -1326,12 +1334,12 @@ sub HMUARTLGW_getAesKey($$) {
 	}
 
 	my @kNos = reverse(sort(keys(%keys)));
-	if ($kNos[$num]) {
-		Log3($hash,1,"HMUARTLGW ${name} key: ".$keys{$kNos[$num]}.", idx: ".$kNos[$num]);
-		return $keys{$kNos[$num]} . $kNos[$num];
+	foreach my $kNo (@kNos) {
+		Log3($hash,1,"HMUARTLGW ${name} key: ".$keys{$kNo}.", idx: ".$kNo);
+		push @k, $keys{$kNo} . $kNo;
 	}
 
-	return "";
+	return @k;
 }
 
 sub HMUARTLGW_writeAesKey($) {
@@ -1548,7 +1556,7 @@ sub HMUARTLGW_decrypt($$)
     <li>hmId<br>
         XXX
         </li><br>
-    <li>hmKey, hmKey2<br>
+    <li>hmKey, hmKey2, hmKey3<br>
         XXX
         </li><br>
     <li>dutyCycle<br>
