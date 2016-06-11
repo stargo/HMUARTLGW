@@ -535,7 +535,7 @@ sub HMUARTLGW_ParsePeers($$) {
 
 	my $peers = substr($msg, 8);
 	$hash->{AssignedPeerCnt} = 0;
-	delete($hash->{Helper}{AssignedPeers});
+	%{$hash->{Helper}{AssignedPeers}} = ();
 	while($peers) {
 		my $id = substr($peers, 0, 6, '');
 		my $aesChannels = substr($peers, 0, 16, '');
@@ -854,7 +854,7 @@ sub HMUARTLGW_Parse($$$)
 	$hash->{RAWMSG} = $msg;
 
 	Log3($hash, 1, "HMUARTLGW ${name} recv: ".sprintf("%02X", $dst)." ${msg}, state ".$hash->{DevState})
-	     if ($msg !~ m/^05/ && $msg !~ m/^040[3C]/);
+	     if ($dst eq HMUARTLGW_DST_OS || ($msg !~ m/^05/ && $hash->{DevState} != HMUARTLGW_STATE_SEND));
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
