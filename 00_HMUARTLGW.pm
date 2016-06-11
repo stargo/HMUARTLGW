@@ -1265,7 +1265,7 @@ sub HMUARTLGW_CheckCmdResp($)
 
 	RemoveInternalTimer($hash);
 	if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
-		$hash->{Helper}{RetryCnt}++;
+		$hash->{Helper}{RetryCnt} += 10;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS &&
