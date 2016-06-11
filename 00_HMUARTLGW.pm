@@ -1268,7 +1268,8 @@ sub HMUARTLGW_CheckCmdResp($)
 		$hash->{Helper}{RetryCnt}++;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS && ($hash->{Helper}{CreditFailed} < 3)) {
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS &&
+	         (!defined($hash->{Helper}{CreditFailed}) || ($hash->{Helper}{CreditFailed} < 3))) {
 		$hash->{Helper}{CreditFailed}++;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		RemoveInternalTimer("HMUARTLGW_CheckCredits:$name");
