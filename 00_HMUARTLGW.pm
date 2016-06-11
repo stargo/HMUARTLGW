@@ -754,6 +754,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		if ($ack eq "02") { #?
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
 		}
+		delete($hash->{Helper}{CreditFailed});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 	}
 
@@ -854,7 +855,7 @@ sub HMUARTLGW_Parse($$$)
 	$hash->{RAWMSG} = $msg;
 
 	Log3($hash, 1, "HMUARTLGW ${name} recv: ".sprintf("%02X", $dst)." ${msg}, state ".$hash->{DevState})
-	     if ($dst eq HMUARTLGW_DST_OS || ($msg !~ m/^05/ && $hash->{DevState} != HMUARTLGW_STATE_SEND));
+	     if ($dst eq HMUARTLGW_DST_OS || ($msg !~ m/^05/ && $msg !~ m/^040[3C]/));
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
@@ -1263,7 +1264,16 @@ sub HMUARTLGW_CheckCmdResp($)
 	my $name = $hash->{NAME};
 
 	RemoveInternalTimer($hash);
-	if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
+	if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
+		$hash->{Helper}{RetryCnt}++;
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		return HMUARTLGW_SendPendingCmd($hash);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS && ($hash->{Helper}{CreditFailed} < 3)) {
+		$hash->{Helper}{CreditFailed}++;
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		RemoveInternalTimer("HMUARTLGW_CheckCredits:$name");
+		InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCredits", "HMUARTLGW_CheckCredits:$name", 1);
+	} elsif ($hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
 		Log3($hash, 1, "HMUARTLGW ${name} did not respond, reopening");
 		HMUARTLGW_Reopen($hash);
 	}
