@@ -417,6 +417,7 @@ sub HMUARTLGW_SendPendingCmd($)
 	my $name = $hash->{NAME};
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
+	    defined($hash->{Helper}{PendingCMD}) &&
 	    @{$hash->{Helper}{PendingCMD}}) {
 		my $cmd = $hash->{Helper}{PendingCMD}->[0];
 
@@ -723,7 +724,8 @@ sub HMUARTLGW_GetSetParameters($;$)
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			HMUARTLGW_ParsePeers($hash, $msg);
 		}
-		if (%{$hash->{Helper}{AssignedPeers}}) {
+		if (defined($hash->{Helper}{AssignedPeers}) &&
+		    %{$hash->{Helper}{AssignedPeers}}) {
 			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS;
 		} else {
 			delete($hash->{Helper}{AssignedPeers});
@@ -1665,7 +1667,7 @@ sub HMUARTLGW_decrypt($$)
         </li><br>
     <li>dutyCycle<br>
         Enable or disable the duty-cycle check (1% rule) performed by the
-	wireless module.<br>
+        wireless module.<br>
         Disabling this might be illegal in your country, please check with local
         regulations!<br>
         Default: 1 (enabled)
