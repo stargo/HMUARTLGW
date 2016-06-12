@@ -125,7 +125,7 @@ sub HMUARTLGW_Initialize($)
 	                   "lgwPw " .
 	                   "hmKey hmKey2 hmKey3 " .
 			   "dutyCycle:1,0 " .
-			   "CSMA/CA:1,0 " .
+			   "csmaCa:1,0 " .
 	                   $readingFnAttributes;
 }
 
@@ -604,7 +604,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_SERIAL, HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CSMACA) {
-		my $csma_ca = AttrVal($name, "CSMA/CA", 1);
+		my $csma_ca = AttrVal($name, "csmaCa", 1);
 
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CSMACA . sprintf("%02x", $csma_ca), HMUARTLGW_DST_OS);
 
@@ -1420,9 +1420,9 @@ sub HMUARTLGW_Attr(@)
 
 		push @{$hash->{Helper}{PendingCMD}}, "DutyCycle";
 		HMUARTLGW_SendPendingCmd($hash);
-	} elsif ($aName eq "CSMA/CA") {
+	} elsif ($aName eq "csmaCa") {
 		if ($cmd eq "set") {
-			return "wrong syntax: CSMA/CA must be 1 or 0"
+			return "wrong syntax: csmaCa must be 1 or 0"
 			    if ($aVal !~ m/^[01]$/);
 			$attr{$name}{$aName} = $aVal;
 		} else {
@@ -1729,7 +1729,7 @@ sub HMUARTLGW_decrypt($$)
         regulations!<br>
         Default: 1 (enabled)
         </li><br>
-    <li>CSMA/CA<br>
+    <li>csmaCa<br>
         Enable or disable CSMA/CA (Carrier sense multiple access with collision
         avoidance), also known as listen-before-talk.
         Disabling this might be illegal in your country, please check with local
