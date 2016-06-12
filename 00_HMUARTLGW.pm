@@ -94,6 +94,8 @@ my %sets = (
 	"hmPairForSec" => "HomeMatic",
 	"hmPairSerial" => "HomeMatic",
 	"reopen"       => "",
+	"open"         => "",
+	"close"        => "",
 );
 
 my %gets = (
@@ -1350,6 +1352,12 @@ sub HMUARTLGW_Set($@)
 		InternalTimer(gettimeofday()+20, "HMUARTLGW_RemoveHMPair", "hmPairForSec:".$name, 1);
 	} elsif ($cmd eq "reopen") {
 		HMUARTLGW_Reopen($hash);
+	} elsif($cmd eq "close") {
+		HMUARTLGW_Undefine($hash, $name);
+		readingsSingleUpdate($hash, "state", "closed", 1);
+		$hash->{XmitOpen} = 0;
+	} elsif($cmd eq "open") {
+		DevIo_OpenDev($hash, 0, "HMUARTLGW_DoInit");
 	}
 
 	return undef;
@@ -1684,8 +1692,14 @@ sub HMUARTLGW_decrypt($$)
   <a name="HMUARTLGW_set"></a>
   <p><b>Set</b></p>
   <ul>
+    <li>close<br>
+        Closes the connection to the device.
+        </li><br>
     <li><a href="#hmPairForSec">hmPairForSec</a></li>
     <li><a href="#hmPairSerial">hmPairSerial</a></li>
+    <li>open<br>
+        Opens the connection to the device and initializes it.
+        </li><br>
     <li>reopen<br>
         Reopens the connection to the device and reinitializes it.
         </li><br>
