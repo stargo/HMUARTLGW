@@ -1370,7 +1370,7 @@ sub HMUARTLGW_Attr(@)
 
 	my $retVal;
 
-	Log3($hash,5,"HMUARTLGW ${name} Attr ${cmd} ${aName} ${aVal}");
+	Log3($hash, 5, "HMUARTLGW ${name} Attr ${cmd} ${aName} ".(($aVal)?$aVal:""));
 
 	return if (!$init_done);
 
