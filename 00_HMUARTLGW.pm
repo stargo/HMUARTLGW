@@ -526,6 +526,7 @@ sub HMUARTLGW_UpdateQueuedPeer($) {
 	my ($hash) = @_;
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
+	    $hash->{Helper}{PeerQueue} &&
 	    @{$hash->{Helper}{PeerQueue}}) {
 		return HMUARTLGW_UpdatePeer($hash, shift(@{$hash->{Helper}{PeerQueue}}));
 	}
