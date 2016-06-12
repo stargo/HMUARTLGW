@@ -434,6 +434,24 @@ sub HMUARTLGW_SendPendingCmd($)
 			$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
+		} elsif ($cmd eq "HMID") {
+			Log3($hash, 5, "HMUARTLGW ${name} setting hmId");
+			$hash->{Helper}{OneParameterOnly} = 1;
+			$hash->{DevState} = HMUARTLGW_STATE_SET_HMID;
+			HMUARTLGW_GetSetParameterReq($hash);
+			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
+		} elsif ($cmd eq "DutyCycle") {
+			Log3($hash, 5, "HMUARTLGW ${name} Enabling/Disabling DutyCycle");
+			$hash->{Helper}{OneParameterOnly} = 1;
+			$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
+			HMUARTLGW_GetSetParameterReq($hash);
+			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
+		} elsif ($cmd eq "CSMACA") {
+			Log3($hash, 5, "HMUARTLGW ${name} Enabling/Disabling CSMA/CA");
+			$hash->{Helper}{OneParameterOnly} = 1;
+			$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
+			HMUARTLGW_GetSetParameterReq($hash);
+			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
 			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 30) {
@@ -549,16 +567,14 @@ sub HMUARTLGW_ParsePeers($$) {
 	}
 }
 
-sub HMUARTLGW_GetSetParameterReq($;$) {
-	my ($hash, $value) = @_;
+sub HMUARTLGW_GetSetParameterReq($) {
+	my ($hash) = @_;
 	my $name = $hash->{NAME};
 
 	RemoveInternalTimer($hash);
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_SET_HMID) {
 		my $hmId = AttrVal($name, "hmId", undef);
-
-		$hmId = $value if (defined($value));
 
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_HMID . $hmId, HMUARTLGW_DST_APP);
 
@@ -588,14 +604,10 @@ sub HMUARTLGW_GetSetParameterReq($;$) {
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CSMACA) {
 		my $csma_ca = AttrVal($name, "CSMA/CA", 1);
 
-		$csma_ca = $value if (defined($value));
-
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CSMACA . sprintf("%02x", $csma_ca), HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CREDITS) {
 		my $dutyCycle = AttrVal($name, "dutyCycle", 1);
-
-		$dutyCycle = $value if (defined($value));
 
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . sprintf("%02x", $dutyCycle), HMUARTLGW_DST_OS);
 
@@ -980,15 +992,7 @@ sub HMUARTLGW_Parse($$$)
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
-				Log3($hash, 5, "HMUARTLGW ${name} can't send due to unknown problem, trying again in a bit");
-
-				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
-					$hash->{Helper}{RetryCnt}++;
-					RemoveInternalTimer($hash);
-					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
-				}
-				return;
+				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?), not retrying!");
 			} else {
 				Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
 			}
@@ -1360,9 +1364,9 @@ sub HMUARTLGW_Attr(@)
 			return "wrong syntax: hmId must be 6-digit-hex-code (3 byte)"
 			    if ($aVal !~ m/^[A-F0-9]{6}$/i);
 
-			$hash->{Helper}{OneParameterOnly} = 1;
-			$hash->{DevState} = HMUARTLGW_STATE_SET_HMID;
-			HMUARTLGW_GetSetParameterReq($hash, $aVal);
+			$attr{$name}{$aName} = $aVal;
+			push @{$hash->{Helper}{PendingCMD}}, "HMID";
+			HMUARTLGW_SendPendingCmd($hash);
 		}
 	} elsif ($aName eq "lgwPw") {
 		if ($hash->{DevType} eq "LGW") {
@@ -1392,23 +1396,24 @@ sub HMUARTLGW_Attr(@)
 		if ($cmd eq "set") {
 			return "wrong syntax: dutyCycle must be 1 or 0"
 			    if ($aVal !~ m/^[01]$/);
-			$dutyCycle = $aVal;
+			$attr{$name}{$aName} = $aVal;
+		} else {
+			delete $attr{$name}{$aName};
 		}
 
-		$hash->{Helper}{OneParameterOnly} = 1;
-		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
-		HMUARTLGW_GetSetParameterReq($hash, $dutyCycle);
+		push @{$hash->{Helper}{PendingCMD}}, "DutyCycle";
+		HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($aName eq "CSMA/CA") {
-		my $csma_ca = 1;
 		if ($cmd eq "set") {
 			return "wrong syntax: CSMA/CA must be 1 or 0"
 			    if ($aVal !~ m/^[01]$/);
-			$csma_ca = $aVal;
+			$attr{$name}{$aName} = $aVal;
+		} else {
+			delete $attr{$name}{$aName};
 		}
 
-		$hash->{Helper}{OneParameterOnly} = 1;
-		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
-		HMUARTLGW_GetSetParameterReq($hash, $csma_ca);
+		push @{$hash->{Helper}{PendingCMD}}, "CSMACA";
+		HMUARTLGW_SendPendingCmd($hash);
 	}
 
 	return $retVal;
