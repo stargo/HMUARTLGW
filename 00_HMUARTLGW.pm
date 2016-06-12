@@ -992,7 +992,16 @@ sub HMUARTLGW_Parse($$$)
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
-				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?), not retrying!");
+				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?), trying again in a bit");
+
+				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
+					#packet was sent, so only retry once!
+					$hash->{Helper}{RetryCnt} += 15;
+					RemoveInternalTimer($hash);
+					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
+					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+				}
+				return;
 			} else {
 				Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
 			}
