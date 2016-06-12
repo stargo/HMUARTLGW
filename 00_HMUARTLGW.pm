@@ -43,6 +43,7 @@ use constant {
 
 	HMUARTLGW_ACK_NACK                 => "00",
 	HMUARTLGW_ACK                      => "01",
+	HMUARTLGW_ACK_INFO                 => "02",
 	HMUARTLGW_ACK_WITH_RESPONSE        => "03",
 	HMUARTLGW_ACK_EUNKNOWN             => "04",
 	HMUARTLGW_ACK_ENOCREDITS           => "05",
@@ -690,7 +691,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_GET_FIRMWARE;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_FIRMWARE) {
-		if ($ack eq "02") { #?
+		if ($ack eq HMUARTLGW_ACK_INFO) {
 			my $fw = hex(substr($msg, 10, 2)).".".
 			         hex(substr($msg, 12, 2)).".".
 			         hex(substr($msg, 14, 2));
@@ -700,7 +701,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_GET_SERIAL;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_SERIAL) {
-		if ($ack eq "02" && $hash->{DevType} eq "UART") { #?
+		if ($ack eq HMUARTLGW_ACK_INFO && $hash->{DevType} eq "UART") {
 			readingsSingleUpdate($hash, "D-serialNr", pack("H*", substr($msg, 4)), 1);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
@@ -751,7 +752,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 			$hash->{DevState} = HMUARTLGW_STATE_RUNNING
 		}
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
-		if ($ack eq "02") { #?
+		if ($ack eq HMUARTLGW_ACK_INFO) {
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
 		}
 		delete($hash->{Helper}{CreditFailed});
@@ -891,7 +892,7 @@ sub HMUARTLGW_Parse($$$)
 		} elsif ($msg =~ m/^04(..)/) {
 			my $ack = $1;
 
-			if ($ack eq "02" && $hash->{DevState} == HMUARTLGW_STATE_QUERY_APP) {
+			if ($ack eq HMUARTLGW_ACK_INFO && $hash->{DevState} == HMUARTLGW_STATE_QUERY_APP) {
 				my $running = pack("H*", substr($msg, 4));
 
 				Log3($hash,1,"HMUARTLGW ${name} currently running ${running}");
@@ -1496,7 +1497,7 @@ sub HMUARTLGW_send_frame($$)
 	my ($hash, $frame) = @_;
 	my $name = $hash->{NAME};
 
-	Log3($hash,5,"HMUARTLGW ${name} send (".length($frame)."): ".unpack("H*", $frame));
+	Log3($hash, 5, "HMUARTLGW ${name} send: (".length($frame)."): ".unpack("H*", $frame));
 
 	my $escaped = substr($frame, 0, 1);
 
@@ -1510,6 +1511,15 @@ sub HMUARTLGW_send_frame($$)
 	}
 
 	$escaped = HMUARTLGW_encrypt($hash, $escaped) if ($hash->{crypto});
+
+	#The module seems to corrupt data when writing to it while it
+	#delivers new data...
+	my $rin = '';
+	vec($rin, $hash->{FD}, 1) = 1;
+	my $n = select($rin, undef, undef, 0);
+	if ($n > 0) {
+		Log3($hash, 1, "HMUARTLGW ${name} send: FD is readable! FIXME: Don't send now!");
+	}
 
 	DevIo_SimpleWrite($hash, $escaped, 0);
 }
