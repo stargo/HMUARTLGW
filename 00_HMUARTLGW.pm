@@ -950,11 +950,10 @@ sub HMUARTLGW_Parse($$$)
 				if ($oldMsg) {
 					#Need to produce our own "failed" challenge
 					my %addvals = ();
-					my $m = substr($oldMsg, 6, 2) .
-					        "A0" .
-					        substr($oldMsg, 10, 2) .
-					        substr($oldMsg, 18, 6) .
-					        substr($oldMsg, 12, 6) .
+					my $m = substr($oldMsg, 8, 2) .
+					        "A002" .
+					        substr($oldMsg, 20, 6) .
+					        substr($oldMsg, 14, 6) .
 					        "04000000000000" .
 					        sprintf("%02X", hex(substr($2, 0, 2))*2);
 					my $dmsg = sprintf("A%02X%s:AESpending::${name}", length($m)/2, uc($m));
@@ -992,11 +991,12 @@ sub HMUARTLGW_Parse($$$)
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
-				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?), trying again in a bit");
+				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?)");
 
-				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
-					#packet was sent, so only retry once!
-					$hash->{Helper}{RetryCnt} += 15;
+				if (substr($oldMsg, 12, 2) eq "01" &&
+				    $hash->{DevState} == HMUARTLGW_STATE_RUNNING) { #retry config-packets only
+					Log3($hash, 1, "HMUARTLGW ${name} retrying config-packet");
+					$hash->{Helper}{RetryCnt} += 10;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
 					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
@@ -1030,7 +1030,7 @@ sub HMUARTLGW_Parse($$$)
 			if ($type eq HMUARTLGW_APP_ACK && $status eq HMUARTLGW_ACK_WITH_RESPONSE_AES_OK) {
 				#Fake AES challenge for CUL_HM
 				my $kNo = sprintf("%02X", (hex($info) * 2));
-				my $c = "${mNr}A0${cmd}${src}${dst}04000000000000${kNo}";
+				my $c = "${mNr}A002${src}${dst}04000000000000${kNo}";
 				$dmsg = sprintf("A%02X%s:AESpending:${rssi}:${name}", length($c)/2, uc($c));
 
 				$CULinfo = "AESCom-ok";
