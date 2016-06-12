@@ -302,7 +302,7 @@ sub HMUARTLGW_LGW_Init($)
 				Log3($hash, 1, "HMUARTLGW ${name} wants to initiate encrypted communication, but no lgwPw set!");
 			} else {
 				my($s,$us) = gettimeofday();
-				my $myiv = sprintf("%04x%06x%s", $s, ($us & 0xffffff), scalar(reverse(substr($2, 14)))); #FIXME...
+				my $myiv = sprintf("%08x%06x%s", ($s & 0xffffffff), ($us & 0xffffff), scalar(reverse(substr($2, 14)))); #FIXME...
 				my $key = Digest::MD5::md5($lgwPw);
 				$hash->{crypto}{cipher} = Crypt::Rijndael->new($key, Crypt::Rijndael::MODE_ECB());
 				$hash->{crypto}{encrypt}{keystream} = '';
@@ -888,6 +888,7 @@ sub HMUARTLGW_Parse($$$)
 			} elsif ($hash->{DevState} > HMUARTLGW_STATE_ENTER_APP) {
 				Log3($hash,1,"HMUARTLGW ${name} unexpected info about ${running} received (module crashed?), reopening");
 				HMUARTLGW_Reopen($hash);
+				return;
 			}
 		} elsif ($msg =~ m/^04(..)/) {
 			my $ack = $1;
@@ -904,7 +905,13 @@ sub HMUARTLGW_Parse($$$)
 				} else {
 					$hash->{DevState} = HMUARTLGW_STATE_ENTER_APP;
 					HMUARTLGW_send($hash, HMUARTLGW_OS_CHANGE_APP, HMUARTLGW_DST_OS);
+					RemoveInternalTimer($hash);
+					InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				}
+			} elsif ($ack eq HMUARTLGW_ACK_NACK && $hash->{DevState} == HMUARTLGW_STATE_ENTER_APP) {
+				Log3($hash,1,"HMUARTLGW ${name} application switch failed, application-firmware probably corrupted!");
+				HMUARTLGW_Reopen($hash);
+				return;
 			}
 		} elsif ($msg =~ m/^05(..)$/) {
 			HMUARTLGW_updateMsgLoad($hash, hex($1));
