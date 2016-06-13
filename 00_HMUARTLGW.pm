@@ -821,7 +821,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
 		$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = "assigned";
-		if (@{$hash->{Helper}{PeerQueue}}) {
+		if (defined($hash->{Helper}{PeerQueue}) && @{$hash->{Helper}{PeerQueue}}) {
 			#Still peers in queue, get current assigned peers
 			#only when queue is empty
 			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
