@@ -502,8 +502,8 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 			$msg = HMUARTLGW_APP_ADD_PEER .
 			       $peer->{id} .
 			       $peer->{kNo} .
-			       (($flags & 0x01) ? "01" : "00") . #AES
-			       (($flags & 0x02) ? "01" : "00");  #Wakeup
+			       (($flags & 0x02) ? "01" : "00") . #Wakeup?
+			       (($flags & 0x02) ? "01" : "00");  #Wakeup?
 		}
 
 		$hash->{Helper}{UpdatePeer} = $peer;
