@@ -88,6 +88,7 @@ use constant {
 	HMUARTLGW_STATE_GET_CREDITS        => 98,
 	HMUARTLGW_STATE_RUNNING            => 99,
 	HMUARTLGW_STATE_SEND               => 100,
+	HMUARTLGW_STATE_SEND_NOACK         => 101,
 };
 
 my %sets = (
@@ -466,10 +467,17 @@ sub HMUARTLGW_SendPendingCmd($)
 				Log3($hash, 5, "HMUARTLGW ${name} Retry: ".$hash->{Helper}{RetryCnt});
 			}
 
-			$hash->{DevState} = HMUARTLGW_STATE_SEND;
+			if (hex(substr($cmd, 10, 2)) & (1 << 5)) { #BIDI
+				InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				$hash->{DevState} = HMUARTLGW_STATE_SEND;
+			} else {
+				Log3($hash, 1, "HMUARTLGW ${name} !BIDI");
+				InternalTimer(gettimeofday()+0.3, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				$hash->{DevState} = HMUARTLGW_STATE_SEND_NOACK;
+			}
+
 			HMUARTLGW_send($hash, $cmd, HMUARTLGW_DST_APP);
 			RemoveInternalTimer($hash);
-			InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
 		}
 	}
 }
@@ -937,7 +945,8 @@ sub HMUARTLGW_Parse($$$)
 			my $ack = $1;
 			my $oldMsg;
 
-			if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
+			if ($hash->{DevState} == HMUARTLGW_STATE_SEND ||
+			    $hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
 				RemoveInternalTimer($hash);
 				$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
@@ -946,28 +955,22 @@ sub HMUARTLGW_Parse($$$)
 
 			if ($ack eq HMUARTLGW_ACK_WITH_RESPONSE ||
 			    $ack eq HMUARTLGW_ACK_WITH_RESPONSE_AES_OK) {
-				$recv = "04" . $1 . $2;
+				$recv = $msg;
 
 			} elsif ($ack eq HMUARTLGW_ACK_WITH_RESPONSE_AES_KO) {
-				if ($oldMsg) {
+				if ($2 =~ m/^FE/) { #challenge msg
+					$recv = $msg;
+				} elsif ($oldMsg) {
 					#Need to produce our own "failed" challenge
-					my %addvals = ();
-					my $m = substr($oldMsg, 8, 2) .
+					$recv = substr($msg, 0, 6) . "01" .
+					        substr($oldMsg, 8, 2) .
 					        "A002" .
 					        substr($oldMsg, 20, 6) .
 					        substr($oldMsg, 14, 6) .
 					        "04000000000000" .
-					        sprintf("%02X", hex(substr($2, 0, 2))*2);
-					my $dmsg = sprintf("A%02X%s:AESpending::${name}", length($m)/2, uc($m));
-
-					Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
-					Dispatch($hash, $dmsg, \%addvals);
-
-					$dmsg = sprintf("A%02X%s:AESCom-fail::${name}", length($m)/2, uc($m));
-
-					Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
-					Dispatch($hash, $dmsg, \%addvals);
+					        sprintf("%02X", hex(substr($msg, 4, 2))*2);
 				}
+				$CULinfo = "AESpending";
 
 			} elsif ($ack eq HMUARTLGW_ACK_EINPROGRESS && $oldMsg) {
 				Log3($hash, 5, "HMUARTLGW ${name} IO currently busy, trying again in a bit");
@@ -1023,8 +1026,13 @@ sub HMUARTLGW_Parse($$$)
 			return if (!$hash->{Helper}{Initialized});
 
 			$rssi = 0 - hex($rssi);
-			$hash->{RSSI} = $rssi;
-			my %addvals = (RAWMSG => $msg, RSSI => $rssi);
+			my %addvals = (RAWMSG => $msg);
+			if ($rssi < -1) {
+				$addvals{RSSI} = $rssi;
+				$hash->{RSSI} = $rssi;
+			} else {
+				$rssi = "";
+			}
 
 			my $dmsg;
 			my $m = $mNr . $flags . $cmd . $src . $dst . $payload;
@@ -1291,6 +1299,11 @@ sub HMUARTLGW_CheckCmdResp($)
 	if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
 		$hash->{Helper}{RetryCnt} += 10;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		return HMUARTLGW_SendPendingCmd($hash);
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
+		shift(@{$hash->{Helper}{PendingCMD}});
+		delete($hash->{Helper}{RetryCnt});
+		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS &&
 	         (!defined($hash->{Helper}{CreditFailed}) || ($hash->{Helper}{CreditFailed} < 3))) {
