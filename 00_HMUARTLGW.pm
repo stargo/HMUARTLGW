@@ -508,7 +508,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
 		$msg = HMUARTLGW_APP_PEER_ADD_AES . $peer->{id};
 
-		if ($peer->{operation} eq "+") {
+		if ($peer->{operation} eq "+" && defined($peer->{aesChannels})) {
 			my $aesChannels = hex(join("",reverse(unpack "(A2)*", $peer->{aesChannels})));
 			Log3($hash,1,"HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
 			for (my $chan = 0; $chan < 60; $chan++) {
