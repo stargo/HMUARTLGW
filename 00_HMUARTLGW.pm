@@ -467,6 +467,8 @@ sub HMUARTLGW_SendPendingCmd($)
 				Log3($hash, 5, "HMUARTLGW ${name} Retry: ".$hash->{Helper}{RetryCnt});
 			}
 
+			RemoveInternalTimer($hash);
+
 			if (hex(substr($cmd, 10, 2)) & (1 << 5)) { #BIDI
 				InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND;
@@ -477,7 +479,6 @@ sub HMUARTLGW_SendPendingCmd($)
 			}
 
 			HMUARTLGW_send($hash, $cmd, HMUARTLGW_DST_APP);
-			RemoveInternalTimer($hash);
 		}
 	}
 }
