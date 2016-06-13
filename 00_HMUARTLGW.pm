@@ -406,7 +406,12 @@ sub HMUARTLGW_CheckCredits($)
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
 		Log3($hash, 5, "HMUARTLGW ${name} checking credits (from timer)");
 		$hash->{Helper}{OneParameterOnly} = 1;
-		$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
+		if (++$hash->{Helper}{CreditTimer} % (4*60*2)) { #about every 2h
+			$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
+		} else {
+			$hash->{DevState} = HMUARTLGW_STATE_SET_TIME;
+			$next = 1;
+		}
 		HMUARTLGW_GetSetParameterReq($hash);
 	} else {
 		$next = 1;
@@ -602,7 +607,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		my @l = localtime($t);
 		my $off = (timegm(@l) - timelocal(@l)) / 1800;
 
-		$tmsg .= sprintf("%04x%02x", $t, $off);
+		$tmsg .= sprintf("%04x%02x", $t, $off & 0xff);
 
 		HMUARTLGW_send($hash, $tmsg, HMUARTLGW_DST_OS);
 
