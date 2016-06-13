@@ -89,6 +89,7 @@ use constant {
 	HMUARTLGW_STATE_RUNNING            => 99,
 	HMUARTLGW_STATE_SEND               => 100,
 	HMUARTLGW_STATE_SEND_NOACK         => 101,
+	HMUARTLGW_STATE_SEND_TIMED       => 102,
 };
 
 my %sets = (
@@ -486,6 +487,14 @@ sub HMUARTLGW_SendPendingCmd($)
 			HMUARTLGW_send($hash, $cmd, HMUARTLGW_DST_APP);
 		}
 	}
+}
+
+sub HMUARTLGW_SendPendingTimer($)
+{
+	my ($hash) = @_;
+
+	$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+	return HMUARTLGW_SendPendingCmd($hash);
 }
 
 sub HMUARTLGW_UpdatePeerReq($;$) {
@@ -985,7 +994,8 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{Helper}{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingTimer", $hash, 0);
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_ENOCREDITS) {
@@ -998,7 +1008,8 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{Helper}{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingTimer", $hash, 0);
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
@@ -1010,7 +1021,8 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{Helper}{RetryCnt} += 8;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingTimer", $hash, 0);
 				}
 				return;
 			} else {
