@@ -600,7 +600,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 
 		my $t = time();
 		my @l = localtime($t);
-		my $off = (timegm(@l) - timelocal(@l)) / 3600;
+		my $off = (timegm(@l) - timelocal(@l)) / 1800;
 
 		$tmsg .= sprintf("%04x%02x", $t, $off);
 
