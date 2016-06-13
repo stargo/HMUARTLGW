@@ -1083,8 +1083,8 @@ sub HMUARTLGW_Parse($$$)
 			# HMUARTLGW sends ACK for flag 'A0' but not for 'A4'(config mode)-
 			# we ack ourself as long as logic is uncertain - also possible is 'A6' for RHS
 			if ((hex($flags) & 0xA4) == 0xA4 && $hash->{owner} eq $dst) {
-				Log3($hash, 1 ,"HMUARTLGW: $name ACK config");
-				HMUARTLGW_Write($hash,undef, "As15".$mNr."8002".$dst.$src."00");
+				Log3($hash, 1 ,"HMUARTLGW $name: ACK config");
+				HMUARTLGW_Write($hash, undef, "As15".$mNr."8002".$dst.$src."00", 1);
 			}
 
 			$dmsg = sprintf("A%02X%s:${CULinfo}:${rssi}:${name}", length($m)/2, uc($m));
@@ -1181,9 +1181,9 @@ sub HMUARTLGW_Read($)
 	}
 }
 
-sub HMUARTLGW_Write($$$)
+sub HMUARTLGW_Write($$$;$)
 {
-	my ($hash,$fn,$msg) = @_;
+	my ($hash, $fn, $msg, $first) = @_;
 	my $name = $hash->{NAME};
 
 	if($msg =~ m/init:(......)/) {
@@ -1260,7 +1260,11 @@ sub HMUARTLGW_Write($$$)
 
 		$cmd .= substr($msg, 4);
 
-		push @{$hash->{Helper}{PendingCMD}}, $cmd;
+		if ($first) {
+			unshift @{$hash->{Helper}{PendingCMD}}, $cmd;
+		} else {
+			push @{$hash->{Helper}{PendingCMD}}, $cmd;
+		}
 		push @{$hash->{Helper}{PendingCMD}}, "Credits" if ((++$hash->{Helper}{SendCnt} % 10) == 0);
 		HMUARTLGW_SendPendingCmd($hash);
 	} else {
@@ -1321,6 +1325,7 @@ sub HMUARTLGW_CheckCmdResp($)
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
 		shift(@{$hash->{Helper}{PendingCMD}});
 		delete($hash->{Helper}{RetryCnt});
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS &&
