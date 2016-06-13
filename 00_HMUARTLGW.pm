@@ -462,7 +462,7 @@ sub HMUARTLGW_SendPendingCmd($)
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
-			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 30) {
+			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 15) {
 				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet");
 				shift(@{$hash->{Helper}{PendingCMD}});
 				delete($hash->{Helper}{RetryCnt});
@@ -985,7 +985,7 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{Helper}{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_ENOCREDITS) {
@@ -998,7 +998,7 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{Helper}{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
@@ -1007,10 +1007,10 @@ sub HMUARTLGW_Parse($$$)
 				if (substr($oldMsg, 12, 2) eq "01" &&
 				    $hash->{DevState} == HMUARTLGW_STATE_RUNNING) { #retry config-packets only
 					Log3($hash, 1, "HMUARTLGW ${name} retrying config-packet");
-					$hash->{Helper}{RetryCnt} += 10;
+					$hash->{Helper}{RetryCnt} += 8;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					InternalTimer(gettimeofday()+0.1, "HMUARTLGW_SendPendingCmd", $hash, 0);
+					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingCmd", $hash, 0);
 				}
 				return;
 			} else {
@@ -1069,8 +1069,8 @@ sub HMUARTLGW_Parse($$$)
 			}
 
 			# HMUARTLGW sends ACK for flag 'A0' but not for 'A4'(config mode)-
-			# we ack ourself an long as logic is uncertain - also possible is 'A6' for RHS
-			if (hex($flags) & 0xA4 == 0xA4 && $hash->{owner} eq $dst) {
+			# we ack ourself as long as logic is uncertain - also possible is 'A6' for RHS
+			if ((hex($flags) & 0xA4) == 0xA4 && $hash->{owner} eq $dst) {
 				Log3($hash, 1 ,"HMUARTLGW: $name ACK config");
 				HMUARTLGW_Write($hash,undef, "As15".$mNr."8002".$dst.$src."00");
 			}
@@ -1303,7 +1303,7 @@ sub HMUARTLGW_CheckCmdResp($)
 
 	RemoveInternalTimer($hash);
 	if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
-		$hash->{Helper}{RetryCnt} += 10;
+		$hash->{Helper}{RetryCnt} += 5;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
