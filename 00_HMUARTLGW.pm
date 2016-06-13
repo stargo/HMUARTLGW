@@ -89,7 +89,7 @@ use constant {
 	HMUARTLGW_STATE_RUNNING            => 99,
 	HMUARTLGW_STATE_SEND               => 100,
 	HMUARTLGW_STATE_SEND_NOACK         => 101,
-	HMUARTLGW_STATE_SEND_TIMED       => 102,
+	HMUARTLGW_STATE_SEND_TIMED         => 102,
 };
 
 my %sets = (
@@ -1018,7 +1018,7 @@ sub HMUARTLGW_Parse($$$)
 				if (substr($oldMsg, 12, 2) eq "01" &&
 				    $hash->{DevState} == HMUARTLGW_STATE_RUNNING) { #retry config-packets only
 					Log3($hash, 1, "HMUARTLGW ${name} retrying config-packet");
-					$hash->{Helper}{RetryCnt} += 8;
+					$hash->{Helper}{RetryCnt} += 5;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
 					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
