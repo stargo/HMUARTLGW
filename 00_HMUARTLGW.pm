@@ -1050,6 +1050,7 @@ sub HMUARTLGW_Parse($$$)
 			} else {
 				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 				     "HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
+				$recv = $msg;
 			}
 
 			delete($hash->{Helper}{RetryCnt});
