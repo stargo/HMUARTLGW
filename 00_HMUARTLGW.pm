@@ -126,8 +126,10 @@ sub HMUARTLGW_Initialize($)
 	$hash->{AttrList}= "hmId " .
 	                   "lgwPw " .
 	                   "hmKey hmKey2 hmKey3 " .
-			   "dutyCycle:1,0 " .
-			   "csmaCa:1,0 " .
+	                   "dutyCycle:1,0 " .
+	                   "csmaCa:1,0 " .
+	                   "qLen " .
+	                   "logIDs ".
 	                   $readingFnAttributes;
 }
 
@@ -140,6 +142,7 @@ sub HMUARTLGW_send_frame($$);
 sub HMUARTLGW_crc16($);
 sub HMUARTLGW_encrypt($$);
 sub HMUARTLGW_decrypt($$);
+sub HMUARTLGW_getVerbLvl($$$$);
 
 sub HMUARTLGW_DoInit($)
 {
@@ -159,6 +162,8 @@ sub HMUARTLGW_DoInit($)
 	$hash->{XmitOpen} = 0;
 
 	$hash->{LGW_Init} = 1 if ($hash->{DevType} =~ m/^LGW/);
+
+	$hash->{Helper}{log} = [ split(/,/, AttrVal($name, "logIDs", "")) ];
 
 	RemoveInternalTimer($hash);
 
@@ -276,7 +281,7 @@ sub HMUARTLGW_LGW_Init($)
 	while($p =~ m/\n/) {
 		(my $line, $p) = split(/\n/, $p, 2);
 		$line =~ s/\r$//;
-		Log3($hash, 4, "HMUARTLGW ${name} read (".length($line)."): ${line}");
+		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} read (".length($line)."): ${line}");
 
 		my $msg;
 
@@ -352,7 +357,7 @@ sub HMUARTLGW_LGW_HandleKeepAlive($)
 	while($p =~ m/\n/) {
 		(my $line, $p) = split(/\n/, $p, 2);
 		$line =~ s/\r$//;
-		Log3($hash, 4, "HMUARTLGW ${name} read (".length($line)."): ${line}");
+		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} read (".length($line)."): ${line}");
 
 		my $msg;
 
@@ -425,6 +430,17 @@ sub HMUARTLGW_SendPendingCmd($)
 {
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
+
+	if ($hash->{XmitOpen} == 2) {
+		if ($hash->{Helper}{PendingCMD}) {
+			my $qLen = AttrVal($name, "qLen", 20);
+			if (scalar(@{$hash->{Helper}{PendingCMD}}) < $qLen) {
+				$hash->{XmitOpen} = 1;
+			}
+		} else {
+			$hash->{XmitOpen} = 1;
+		}
+	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
 	    defined($hash->{Helper}{PendingCMD}) &&
@@ -585,7 +601,8 @@ sub HMUARTLGW_ParsePeers($$) {
 		my $id = substr($peers, 0, 6, '');
 		my $aesChannels = substr($peers, 0, 16, '');
 		my $flags = hex(substr($peers, 0, 2, ''));
-		Log3($hash, 3, "HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
+		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 4),
+		     "HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
 
 		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (flags: ${flags})";
 		$hash->{AssignedPeerCnt}++;
@@ -694,7 +711,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	RemoveInternalTimer($hash);
 
-	Log3($hash, 1, "HMUARTLGW ${name} GetSet Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
+	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} GetSet Ack: ${ack}, state ".$hash->{DevState}) if ($ack);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
 		#Retry
@@ -893,8 +910,9 @@ sub HMUARTLGW_Parse($$$)
 
 	$hash->{RAWMSG} = $msg;
 
-	Log3($hash, 1, "HMUARTLGW ${name} recv: ".sprintf("%02X", $dst)." ${msg}, state ".$hash->{DevState})
-	     if ($dst eq HMUARTLGW_DST_OS || ($msg !~ m/^05/ && $msg !~ m/^040[3C]/));
+	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+	     "HMUARTLGW ${name} recv: ".sprintf("%02X", $dst)." ${msg}, state ".$hash->{DevState})
+	    if ($dst eq HMUARTLGW_DST_OS || ($msg !~ m/^05/ && $msg !~ m/^040[3C]/));
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
@@ -1039,7 +1057,8 @@ sub HMUARTLGW_Parse($$$)
 		if ($recv && $recv =~ m/^(..)(..)(..)(..)(..)(..)(..)(......)(......)(.*)$/) {
 			my ($type, $status, $info, $rssi, $mNr, $flags, $cmd, $src, $dst, $payload) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
-			Log3($hash, 1, "HMUARTLGW ${name} recv: 01 ${type} ${status} ${info} ${rssi} msg: ${mNr} ${flags} ${cmd} ${src} ${dst} ${payload}");
+			Log3($hash, HMUARTLGW_getVerbLvl($hash, $src, $dst, 5),
+			     "HMUARTLGW ${name} recv: 01 ${type} ${status} ${info} ${rssi} msg: ${mNr} ${flags} ${cmd} ${src} ${dst} ${payload}");
 
 			return if (!$hash->{Helper}{Initialized});
 
@@ -1230,7 +1249,17 @@ sub HMUARTLGW_Write($$$;$)
 		    defined($hash->{Peers}{$dst})){
 			# Acks are generally send by HMUARTLGW autonomously
 			# Special
-			Log3($hash, 5, "HMUARTLGW: Skip ACK");
+			Log3($hash, 5, "HMUARTLGW ${name}: Skip ACK");
+			return;
+		}
+
+		my $qLen = AttrVal($name, "qLen", 20);
+
+		#Queue full?
+		if ($hash->{Helper}{PendingCMD} &&
+		    scalar(@{$hash->{Helper}{PendingCMD}}) >= $qLen) {
+			Log3($hash, 1, "HMUARTLGW ${name}: queue is full, dropping packet");
+			$hash->{XmitOpen} = 2 if ($hash->{XmitOpen} == 1);
 			return;
 		}
 
@@ -1260,6 +1289,13 @@ sub HMUARTLGW_Write($$$;$)
 		}
 		push @{$hash->{Helper}{PendingCMD}}, "Credits" if ((++$hash->{Helper}{SendCnt} % 10) == 0);
 		HMUARTLGW_SendPendingCmd($hash);
+
+		# Check queue again
+		if ($hash->{Helper}{PendingCMD} &&
+		    scalar(@{$hash->{Helper}{PendingCMD}}) >= $qLen) {
+			$hash->{XmitOpen} = 2 if ($hash->{XmitOpen} == 1);
+			return;
+		}
 	} else {
 		Log3($hash, 1, "HMUARTLGW ${name} write:${fn} ${msg}");
 	}
@@ -1401,8 +1437,6 @@ sub HMUARTLGW_Attr(@)
 
 	Log3($hash, 5, "HMUARTLGW ${name} Attr ${cmd} ${aName} ".(($aVal)?$aVal:""));
 
-	return if (!$init_done);
-
 	if ($aName eq "hmId") {
 		if ($cmd eq "set") {
 			my $owner_ccu = InternalVal($name, "owner_CCU", undef);
@@ -1411,12 +1445,17 @@ sub HMUARTLGW_Attr(@)
 			    if ($aVal !~ m/^[A-F0-9]{6}$/i);
 
 			$attr{$name}{$aName} = $aVal;
-			push @{$hash->{Helper}{PendingCMD}}, "HMID";
-			HMUARTLGW_SendPendingCmd($hash);
+
+			if ($init_done) {
+				push @{$hash->{Helper}{PendingCMD}}, "HMID";
+				HMUARTLGW_SendPendingCmd($hash);
+			}
 		}
 	} elsif ($aName eq "lgwPw") {
-		if ($hash->{DevType} eq "LGW") {
-			HMUARTLGW_Reopen($hash);
+		if ($init_done) {
+			if ($hash->{DevType} eq "LGW") {
+				HMUARTLGW_Reopen($hash);
+			}
 		}
 	} elsif ($aName =~ m/^hmKey(.?)$/) {
 		if ($cmd eq "set") {
@@ -1436,7 +1475,7 @@ sub HMUARTLGW_Attr(@)
 		} else {
 			delete $attr{$name}{$aName};
 		}
-		HMUARTLGW_writeAesKey($name);
+		HMUARTLGW_writeAesKey($name) if ($init_done);
 	} elsif ($aName eq "dutyCycle") {
 		my $dutyCycle = 1;
 		if ($cmd eq "set") {
@@ -1447,8 +1486,10 @@ sub HMUARTLGW_Attr(@)
 			delete $attr{$name}{$aName};
 		}
 
-		push @{$hash->{Helper}{PendingCMD}}, "DutyCycle";
-		HMUARTLGW_SendPendingCmd($hash);
+		if ($init_done) {
+			push @{$hash->{Helper}{PendingCMD}}, "DutyCycle";
+			HMUARTLGW_SendPendingCmd($hash);
+		}
 	} elsif ($aName eq "csmaCa") {
 		if ($cmd eq "set") {
 			return "wrong syntax: csmaCa must be 1 or 0"
@@ -1458,8 +1499,31 @@ sub HMUARTLGW_Attr(@)
 			delete $attr{$name}{$aName};
 		}
 
-		push @{$hash->{Helper}{PendingCMD}}, "CSMACA";
-		HMUARTLGW_SendPendingCmd($hash);
+		if ($init_done) {
+			push @{$hash->{Helper}{PendingCMD}}, "CSMACA";
+			HMUARTLGW_SendPendingCmd($hash);
+		}
+	} elsif ($aName eq "qLen") {
+		if ($cmd eq "set") {
+			return "wrong syntax: qLen must be between 1 and 100"
+			    if ($aVal !~ m/^\d+$/ || $aVal < 1 || $aVal > 100);
+			$attr{$name}{$aName} = $aVal;
+		} else {
+			delete $attr{$name}{$aName};
+		}
+	} elsif ($aName eq "logIDs") {
+		if ($cmd eq "set") {
+			my @ids = split(/,/, $aVal);
+
+			return "wrong syntax: logIDs can only contain hmIDs, \"sys\" and \"all\""
+			    if (grep(!/^([\dabcdef]{6}|sys|all)$/i, @ids));
+
+			$hash->{Helper}{log} = \@ids;
+			$attr{$name}{$aName} = $aVal;
+		} else {
+			delete $attr{$name}{$aName};
+			delete $hash->{Helper}{log};
+		}
 	}
 
 	return $retVal;
@@ -1501,10 +1565,12 @@ sub HMUARTLGW_writeAesKey($) {
 sub HMUARTLGW_updateMsgLoad($$) {
 	my ($hash, $load) = @_;
 
-	if ($load >= 199) {
-		$hash->{XmitOpen} = 0;
-	} else {
-		$hash->{XmitOpen} = 1;
+	if ($hash->{XmitOpen} != 2) {
+		if ($load >= 199) {
+			$hash->{XmitOpen} = 0;
+		} else {
+			$hash->{XmitOpen} = 1;
+		}
 	}
 	$hash->{msgLoadCurrent} = $load;
 }
@@ -1515,6 +1581,7 @@ sub HMUARTLGW_send($$$)
 	my $name = $hash->{NAME};
 
 	my $log;
+	my $v;
 
 	if ($dst == HMUARTLGW_DST_APP && uc($msg) =~ m/^(02)(..)(..)(.*)$/) {
 		$log = "01 ${1} ${2} ${3} ";
@@ -1532,11 +1599,13 @@ sub HMUARTLGW_send($$$)
 		} else {
 			$log .= $m;
 		}
+		$v = HMUARTLGW_getVerbLvl($hash, $4, $5, 5);
 	} else {
 		$log = sprintf("%02X", $dst). " ".uc($msg);
+		$v = HMUARTLGW_getVerbLvl($hash, undef, undef, 5);
 	}
 
-	Log3($hash, 1, "HMUARTLGW ${name} send: ${log}");
+	Log3($hash, $v, "HMUARTLGW ${name} send: ${log}");
 
 	$hash->{CNT} = ($hash->{CNT} + 1) & 0xff;
 
@@ -1590,7 +1659,7 @@ sub HMUARTLGW_sendAscii($$)
 
 	$msg = sprintf($msg, $hash->{CNT});
 
-	Log3($hash, 4, "HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
+	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
 	$msg = HMUARTLGW_encrypt($hash, $msg) if ($hash->{crypto} && !($msg =~ m/^V/));
 
 	$hash->{CNT} = ($hash->{CNT} + 1) & 0xff;
@@ -1682,6 +1751,17 @@ sub HMUARTLGW_decrypt($$)
 	$plaintext;
 }
 
+sub HMUARTLGW_getVerbLvl($$$$) {
+	my ($hash, $src, $dst, $def) = @_;
+
+	$hash = $hash->{lgwHash} if (defined($hash->{lgwHash}));
+
+	return (grep /^sys$/i, @{$hash->{Helper}{log}}) ? 0 : $def
+	    if ((!defined($src)) || (!defined($dst)));
+
+	return (grep /^($src|$dst|all)$/i, @{$hash->{Helper}{log}}) ? 0 : $def;
+}
+
 1;
 
 =pod
@@ -1723,15 +1803,15 @@ sub HMUARTLGW_decrypt($$)
   <ul>
     <li>close<br>
         Closes the connection to the device.
-        </li><br>
+        </li>
     <li><a href="#hmPairForSec">hmPairForSec</a></li>
     <li><a href="#hmPairSerial">hmPairSerial</a></li>
     <li>open<br>
         Opens the connection to the device and initializes it.
-        </li><br>
+        </li>
     <li>reopen<br>
         Reopens the connection to the device and reinitializes it.
-        </li><br>
+        </li>
   </ul>
   <br>
   <a name="HMUARTLGW_get"></a>
@@ -1739,6 +1819,20 @@ sub HMUARTLGW_decrypt($$)
   <a name="HMUARTLGW_attr"></a>
   <b>Attributes</b>
   <ul>
+    <li>csmaCa<br>
+        Enable or disable CSMA/CA (Carrier sense multiple access with collision
+        avoidance), also known as listen-before-talk.
+        Disabling this might be illegal in your country, please check with local
+        regulations!<br>
+        Default: 1 (enabled)
+        </li>
+    <li>dutyCycle<br>
+        Enable or disable the duty-cycle check (1% rule) performed by the
+        wireless module.<br>
+        Disabling this might be illegal in your country, please check with local
+        regulations!<br>
+        Default: 1 (enabled)
+        </li>
     <li><a href="#hmId">hmId</a></li>
     <li><a name="HMLANhmKey">hmKey</a></li>
     <li><a name="HMLANhmKey2">hmKey2</a></li>
@@ -1750,21 +1844,22 @@ sub HMUARTLGW_decrypt($$)
         this attribute has to be set to the correct value or communication will
         not be possible. In addition, the perl-module Crypt::Rijndael (which
         provides the AES cipher) must be installed.
-        </li><br>
-    <li>dutyCycle<br>
-        Enable or disable the duty-cycle check (1% rule) performed by the
-        wireless module.<br>
-        Disabling this might be illegal in your country, please check with local
-        regulations!<br>
-        Default: 1 (enabled)
-        </li><br>
-    <li>csmaCa<br>
-        Enable or disable CSMA/CA (Carrier sense multiple access with collision
-        avoidance), also known as listen-before-talk.
-        Disabling this might be illegal in your country, please check with local
-        regulations!<br>
-        Default: 1 (enabled)
-        </li><br>
+        </li>
+    <li>logIDs<br>
+        Enables selective logging of HMUARTLGW messages. A list of comma separated
+        HMIds can be entered which shall be logged. The attribute only allows
+        device-IDs, not channel IDs.<br>
+        <ul>
+            <li><i>all</i>: will log raw messages for all HMIds</li>
+            <li><i>sys</i>: will log system related messages like keep-alive</li>
+        </ul>
+        In order to enable all messages set: <i>all,sys</i>
+        </li>
+    <li>qLen<br>
+        Maximum number of commands in the internal queue of the HMUARTLGW module.
+        New commands when the queue is full are dropped.<br>
+        Default: 20
+        </li>
   </ul>
   <br>
 
