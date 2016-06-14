@@ -74,11 +74,10 @@ use constant {
 	HMUARTLGW_STATE_GET_FIRMWARE       => 10,
 	HMUARTLGW_STATE_ENABLE_CSMACA      => 11,
 	HMUARTLGW_STATE_ENABLE_CREDITS     => 12,
-	HMUARTLGW_STATE_CLEAR_PEERS        => 13,
-	HMUARTLGW_STATE_GET_SERIAL         => 14,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 15,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 16,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 17,
+	HMUARTLGW_STATE_GET_SERIAL         => 13,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 14,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 15,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 16,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -699,11 +698,6 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		%{$hash->{Helper}{AssignedPeers}} = ();
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
-		my $peer = (keys(%{$hash->{Helper}{AssignedPeers}}))[0];
-		$hash->{Helper}{RemovePeer} = $peer;
-		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . $peer, HMUARTLGW_DST_APP);
-
 	} elsif ($hash->{DevState} >= HMUARTLGW_STATE_UPDATE_PEER &&
 	         $hash->{DevState} <= HMUARTLGW_STATE_UPDATE_PEER_CFG) {
 		HMUARTLGW_UpdatePeerReq($hash);
@@ -811,30 +805,18 @@ sub HMUARTLGW_GetSetParameters($;$)
 			RemoveInternalTimer($hash);
 			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
 			return;
-		} elsif (defined($hash->{Helper}{AssignedPeers}) &&
+		}
+
+		if (defined($hash->{Helper}{AssignedPeers}) &&
 		    %{$hash->{Helper}{AssignedPeers}}) {
-			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS;
-		} else {
-			delete($hash->{Helper}{AssignedPeers});
-			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+
+			foreach my $p (keys(%{$hash->{Helper}{AssignedPeers}})) {
+				unshift @{$hash->{Helper}{PeerQueue}}, { id => $p, operation => "-" };
+			}
 		}
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
-		$hash->{AssignedPeerCnt} = 0;
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
-			#040701010001
-			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
-		}
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
-		delete($hash->{Helper}{AssignedPeers}{$hash->{Helper}{RemovePeer}});
-		delete($hash->{Helper}{RemovePeer});
-
-		if (%{$hash->{Helper}{AssignedPeers}}) {
-			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS
-		} else {
-			delete($hash->{Helper}{AssignedPeers});
-			$hash->{DevState} = HMUARTLGW_STATE_RUNNING
-		}
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
 		if ($ack eq HMUARTLGW_ACK_INFO) {
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
