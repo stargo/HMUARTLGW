@@ -244,7 +244,7 @@ sub HMUARTLGW_Reopen($;$)
 	$hash = $hash->{lgwHash} if ($hash->{lgwHash});
 	my $name = $hash->{NAME};
 
-	Log3($hash,1,"HMUARTLGW ${name} Reopen");
+	Log3($hash, 1, "HMUARTLGW ${name} Reopen");
 
 	HMUARTLGW_Undefine($hash, $name, $noclose);
 
@@ -256,7 +256,7 @@ sub HMUARTLGW_Ready($)
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
 
-	Log3($hash,1,"HMUARTLGW ${name} ready: ".$hash->{STATE});
+	Log3($hash, 4, "HMUARTLGW ${name} ready: ".$hash->{STATE});
 
 	if ((!$hash->{lgwHash}) && $hash->{STATE} eq "disconnected") {
 		return HMUARTLGW_Reopen($hash, 1);
@@ -479,7 +479,7 @@ sub HMUARTLGW_SendPendingCmd($)
 				InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND;
 			} else {
-				Log3($hash, 1, "HMUARTLGW ${name} !BIDI");
+				Log3($hash, 5, "HMUARTLGW ${name} !BIDI");
 				InternalTimer(gettimeofday()+0.3, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND_NOACK;
 			}
@@ -533,10 +533,10 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 
 		if ($peer->{operation} eq "+" && defined($peer->{aesChannels})) {
 			my $aesChannels = hex(join("",reverse(unpack "(A2)*", $peer->{aesChannels})));
-			Log3($hash,1,"HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
+			Log3($hash, 4, "HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
 			for (my $chan = 0; $chan < 60; $chan++) {
 				if ($aesChannels & (1 << $chan)) {
-					Log3($hash,1,"HMUARTLGW ${name} Enabling AES for channel ${chan}");
+					Log3($hash, 4, "HMUARTLGW ${name} Enabling AES for channel ${chan}");
 					$msg .= sprintf("%02x", $chan)
 				}
 			}
@@ -584,10 +584,10 @@ sub HMUARTLGW_ParsePeers($$) {
 	while($peers) {
 		my $id = substr($peers, 0, 6, '');
 		my $aesChannels = substr($peers, 0, 16, '');
-		my $kNo= hex(substr($peers, 0, 2, ''));
-		Log3($hash,1,"HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, kNo: ${kNo}");
+		my $flags = hex(substr($peers, 0, 2, ''));
+		Log3($hash, 3, "HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
 
-		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (kNo: ${kNo})";
+		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (flags: ${flags})";
 		$hash->{AssignedPeerCnt}++;
 	}
 }
@@ -694,7 +694,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	RemoveInternalTimer($hash);
 
-	Log3($hash,1,"HMUARTLGW ${name} GetSet Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
+	Log3($hash, 1, "HMUARTLGW ${name} GetSet Ack: ${ack}, State: ".$hash->{DevState}) if ($ack);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
 		#Retry
@@ -914,17 +914,17 @@ sub HMUARTLGW_Parse($$$)
 			my $running = pack("H*", substr($msg, 2));
 
 			if ($hash->{DevState} == HMUARTLGW_STATE_ENTER_APP) {
-				Log3($hash,1,"HMUARTLGW ${name} currently running ${running}");
+				Log3($hash, 3, "HMUARTLGW ${name} currently running ${running}");
 
 				if ($running eq "Co_CPU_App") {
 					$hash->{DevState} = HMUARTLGW_STATE_GETSET_PARAMETERS;
 					RemoveInternalTimer($hash);
 					InternalTimer(gettimeofday()+1, "HMUARTLGW_GetSetParameters", $hash, 0);
 				} else {
-					Log3($hash,1,"HMUARTLGW ${name} failed to enter App!");
+					Log3($hash, 1, "HMUARTLGW ${name} failed to enter App!");
 				}
 			} elsif ($hash->{DevState} > HMUARTLGW_STATE_ENTER_APP) {
-				Log3($hash,1,"HMUARTLGW ${name} unexpected info about ${running} received (module crashed?), reopening");
+				Log3($hash, 1, "HMUARTLGW ${name} unexpected info about ${running} received (module crashed?), reopening");
 				HMUARTLGW_Reopen($hash);
 				return;
 			}
@@ -934,7 +934,7 @@ sub HMUARTLGW_Parse($$$)
 			if ($ack eq HMUARTLGW_ACK_INFO && $hash->{DevState} == HMUARTLGW_STATE_QUERY_APP) {
 				my $running = pack("H*", substr($msg, 4));
 
-				Log3($hash,1,"HMUARTLGW ${name} currently running ${running}");
+				Log3($hash, 3, "HMUARTLGW ${name} currently running ${running}");
 
 				if ($running eq "Co_CPU_App") {
 					$hash->{DevState} = HMUARTLGW_STATE_GETSET_PARAMETERS;
@@ -947,7 +947,7 @@ sub HMUARTLGW_Parse($$$)
 					InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				}
 			} elsif ($ack eq HMUARTLGW_ACK_NACK && $hash->{DevState} == HMUARTLGW_STATE_ENTER_APP) {
-				Log3($hash,1,"HMUARTLGW ${name} application switch failed, application-firmware probably corrupted!");
+				Log3($hash, 1, "HMUARTLGW ${name} application switch failed, application-firmware probably corrupted!");
 				HMUARTLGW_Reopen($hash);
 				return;
 			}
@@ -1078,13 +1078,6 @@ sub HMUARTLGW_Parse($$$)
 			if ($dmsg) {
 				Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 				Dispatch($hash, $dmsg, \%addvals);
-			}
-
-			# HMUARTLGW sends ACK for flag 'A0' but not for 'A4'(config mode)-
-			# we ack ourself as long as logic is uncertain - also possible is 'A6' for RHS
-			if ((hex($flags) & 0xA4) == 0xA4 && $hash->{owner} eq $dst) {
-				Log3($hash, 1 ,"HMUARTLGW $name: ACK config");
-				HMUARTLGW_Write($hash, undef, "As15".$mNr."8002".$dst.$src."00", 1);
 			}
 
 			$dmsg = sprintf("A%02X%s:${CULinfo}:${rssi}:${name}", length($m)/2, uc($m));
@@ -1268,7 +1261,7 @@ sub HMUARTLGW_Write($$$;$)
 		push @{$hash->{Helper}{PendingCMD}}, "Credits" if ((++$hash->{Helper}{SendCnt} % 10) == 0);
 		HMUARTLGW_SendPendingCmd($hash);
 	} else {
-		Log3($hash,1,"HMUARTLGW ${name} write:${fn} ${msg}");
+		Log3($hash, 1, "HMUARTLGW ${name} write:${fn} ${msg}");
 	}
 
 
@@ -1489,7 +1482,7 @@ sub HMUARTLGW_getAesKeys($) {
 
 	my @kNos = reverse(sort(keys(%keys)));
 	foreach my $kNo (@kNos) {
-		Log3($hash,1,"HMUARTLGW ${name} key: ".$keys{$kNo}.", idx: ".$kNo);
+		Log3($hash, 4, "HMUARTLGW ${name} key: ".$keys{$kNo}.", idx: ".$kNo);
 		push @k, $keys{$kNo} . $kNo;
 	}
 
