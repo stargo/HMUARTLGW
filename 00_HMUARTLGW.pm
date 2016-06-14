@@ -672,7 +672,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . "000000", HMUARTLGW_DST_APP);
+		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER, HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		$hash->{Helper}{KnownPeerCnt} = 0;
@@ -808,6 +808,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
+		$hash->{AssignedPeerCnt} = 0;
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			#040701010001
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
@@ -868,6 +869,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
+		$hash->{AssignedPeerCnt} = 0;
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			#040701010002fffffffffffffff9
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
