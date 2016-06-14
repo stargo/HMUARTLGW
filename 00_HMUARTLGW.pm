@@ -673,7 +673,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . "000000", HMUARTLGW_DST_APP);
+		HMUARTLGW_send($hash, HMUARTLGW_APP_ADD_PEER . "000001000000", HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		$hash->{Helper}{KnownPeerCnt} = 0;
