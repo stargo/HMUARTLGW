@@ -69,16 +69,17 @@ use constant {
 	HMUARTLGW_STATE_SET_HMID           => 5,
 	HMUARTLGW_STATE_GET_HMID           => 6,
 	HMUARTLGW_STATE_GET_DEFAULT_HMID   => 7,
-	HMUARTLGW_STATE_GET_PEERS          => 8,
-	HMUARTLGW_STATE_GET_FIRMWARE       => 9,
-	HMUARTLGW_STATE_ENABLE_CSMACA      => 10,
-	HMUARTLGW_STATE_ENABLE_CREDITS     => 11,
-	HMUARTLGW_STATE_CLEAR_PEERS        => 12,
-	HMUARTLGW_STATE_CLEAR_PEERS_AES    => 13,
-	HMUARTLGW_STATE_GET_SERIAL         => 14,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 15,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 16,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 17,
+	HMUARTLGW_STATE_GET_PEERCNT        => 8,
+	HMUARTLGW_STATE_GET_PEERS          => 9,
+	HMUARTLGW_STATE_GET_FIRMWARE       => 10,
+	HMUARTLGW_STATE_ENABLE_CSMACA      => 11,
+	HMUARTLGW_STATE_ENABLE_CREDITS     => 12,
+	HMUARTLGW_STATE_CLEAR_PEERS        => 13,
+	HMUARTLGW_STATE_CLEAR_PEERS_AES    => 14,
+	HMUARTLGW_STATE_GET_SERIAL         => 15,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 16,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 17,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 18,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -559,6 +560,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
+		$hash->{Helper}{KnownPeerCnt} = 0;
 		$msg = HMUARTLGW_APP_GET_PEERS;
 	}
 
@@ -595,7 +597,6 @@ sub HMUARTLGW_ParsePeers($$) {
 	my ($hash, $msg) = @_;
 
 	my $peers = substr($msg, 8);
-	$hash->{AssignedPeerCnt} = 0;
 	%{$hash->{Helper}{AssignedPeers}} = ();
 	while($peers) {
 		my $id = substr($peers, 0, 6, '');
@@ -605,7 +606,7 @@ sub HMUARTLGW_ParsePeers($$) {
 		     "HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
 
 		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (flags: ${flags})";
-		$hash->{AssignedPeerCnt}++;
+		$hash->{Helper}{KnownPeerCnt}++;
 	}
 }
 
@@ -670,7 +671,11 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		delete($hash->{Helper}{AESKeyQueue});
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
+		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . "000000", HMUARTLGW_DST_APP);
+
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
+		$hash->{Helper}{KnownPeerCnt} = 0;
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
@@ -774,13 +779,26 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
+		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERCNT;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
+		$hash->{AssignedPeerCnt} = 0;
+		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
+		}
 		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			HMUARTLGW_ParsePeers($hash, $msg);
 		}
-		if (defined($hash->{Helper}{AssignedPeers}) &&
+		if ($hash->{Helper}{KnownPeerCnt} < $hash->{AssignedPeerCnt}) {
+			#there will be more answer messages
+			$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
+			RemoveInternalTimer($hash);
+			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+			return;
+		} elsif (defined($hash->{Helper}{AssignedPeers}) &&
 		    %{$hash->{Helper}{AssignedPeers}}) {
 			$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS;
 		} else {
@@ -874,9 +892,16 @@ sub HMUARTLGW_GetSetParameters($;$)
 			HMUARTLGW_ParsePeers($hash, $msg);
 		}
 
-		delete($hash->{Helper}{UpdatePeer});
-
-		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		if ($hash->{Helper}{KnownPeerCnt} < $hash->{AssignedPeerCnt}) {
+			#there will be more messages
+			$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+			RemoveInternalTimer($hash);
+			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+			return;
+		} else {
+			delete($hash->{Helper}{UpdatePeer});
+			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+		}
 	}
 
 	#Don't continue in state-machine if only one parameter should be
@@ -916,7 +941,7 @@ sub HMUARTLGW_Parse($$$)
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
-		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping");
+		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping. We: $hash->{CNT}, device: $hash->{DEVCNT}");
 		return;
 	}
 
