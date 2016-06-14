@@ -524,9 +524,9 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 	my $msg;
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
-		if ($peer->{operation} eq "-") {
-			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
-		} else {
+		$hash->{Helper}{UpdatePeer} = $peer;
+
+		if ($peer->{operation} eq "+") {
 			my $flags = hex($peer->{flags});
 
 			$msg = HMUARTLGW_APP_ADD_PEER .
@@ -534,9 +534,9 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 			       $peer->{kNo} .
 			       (($flags & 0x02) ? "01" : "00") . #Wakeup?
 			       (($flags & 0x02) ? "01" : "00");  #Wakeup?
+		} else {
+			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
 		}
-
-		$hash->{Helper}{UpdatePeer} = $peer;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
 		my $offset = 0;
@@ -882,16 +882,34 @@ sub HMUARTLGW_GetSetParameters($;$)
 		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
 			#040701010002fffffffffffffff9
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
-			$hash->{Helper}{AssignedPeers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
-			$hash->{Helper}{UpdatePeer}{aes} = substr($msg, 12);
+			if (length($msg) > 12) {
+				$hash->{Helper}{AssignedPeers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
+				$hash->{Helper}{UpdatePeer}{aes} = substr($msg, 12);
+			}
 		}
-		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
+
+		if ($hash->{Helper}{UpdatePeer}{operation} eq "+") {
+			$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
+		} else {
+			if (defined($hash->{Helper}{PeerQueue}) && @{$hash->{Helper}{PeerQueue}}) {
+				#Still peers in queue, get current assigned peers
+				#only when queue is empty
+				$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+			} else {
+				$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+			}
+		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
 		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES2;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
-		$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = "assigned";
+		if ($hash->{Helper}{UpdatePeer}->{operation} eq "+") {
+			$hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}} = "assigned";
+		} else {
+			delete($hash->{Peers}{$hash->{Helper}{UpdatePeer}->{id}});
+		}
+
 		if (defined($hash->{Helper}{PeerQueue}) && @{$hash->{Helper}{PeerQueue}}) {
 			#Still peers in queue, get current assigned peers
 			#only when queue is empty
