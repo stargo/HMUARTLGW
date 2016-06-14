@@ -1006,7 +1006,8 @@ sub HMUARTLGW_Parse($$$)
 				$CULinfo = "AESpending";
 
 			} elsif ($ack eq HMUARTLGW_ACK_EINPROGRESS && $oldMsg) {
-				Log3($hash, 5, "HMUARTLGW ${name} IO currently busy, trying again in a bit");
+				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+				     "HMUARTLGW ${name} IO currently busy, trying again in a bit");
 
 				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
 					$hash->{Helper}{RetryCnt}++;
@@ -1020,7 +1021,8 @@ sub HMUARTLGW_Parse($$$)
 				Log3($hash, 1, "HMUARTLGW ${name} IO in overload!");
 				$hash->{XmitOpen} = 0;
 			} elsif ($ack eq HMUARTLGW_ACK_ECSMACA && $oldMsg) {
-				Log3($hash, 1, "HMUARTLGW ${name} can't send due to CSMA/CA, trying again in a bit");
+				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+				     "HMUARTLGW ${name} can't send due to CSMA/CA, trying again in a bit");
 
 				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
 					$hash->{Helper}{RetryCnt}++;
@@ -1031,11 +1033,13 @@ sub HMUARTLGW_Parse($$$)
 				}
 				return;
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
-				Log3($hash, 1, "HMUARTLGW ${name} can't send due to unknown problem (no response?)");
+				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+				     "HMUARTLGW ${name} can't send due to unknown problem (no response?)");
 
 				if (substr($oldMsg, 12, 2) eq "01" &&
 				    $hash->{DevState} == HMUARTLGW_STATE_RUNNING) { #retry config-packets only
-					Log3($hash, 1, "HMUARTLGW ${name} retrying config-packet");
+					Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+					     "HMUARTLGW ${name} retrying config-packet");
 					$hash->{Helper}{RetryCnt} += 5;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
@@ -1044,7 +1048,8 @@ sub HMUARTLGW_Parse($$$)
 				}
 				return;
 			} else {
-				Log3($hash,1,"HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
+				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+				     "HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
 			}
 
 			delete($hash->{Helper}{RetryCnt});
@@ -1646,7 +1651,8 @@ sub HMUARTLGW_send_frame($$)
 	vec($rin, $hash->{FD}, 1) = 1;
 	my $n = select($rin, undef, undef, 0);
 	if ($n > 0) {
-		Log3($hash, 1, "HMUARTLGW ${name} send: FD is readable! FIXME: Don't send now!");
+		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+		     "HMUARTLGW ${name} send: FD is readable! This might corrupt the received frame!");
 	}
 
 	DevIo_SimpleWrite($hash, $escaped, 0);
@@ -1659,7 +1665,8 @@ sub HMUARTLGW_sendAscii($$)
 
 	$msg = sprintf($msg, $hash->{CNT});
 
-	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
+	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+	     "HMUARTLGW ${name} send (".length($msg)."): ". $msg =~ s/\r\n//r);
 	$msg = HMUARTLGW_encrypt($hash, $msg) if ($hash->{crypto} && !($msg =~ m/^V/));
 
 	$hash->{CNT} = ($hash->{CNT} + 1) & 0xff;
@@ -1770,7 +1777,7 @@ sub HMUARTLGW_getVerbLvl($$$$) {
 <a name="HMUARTLGW"></a>
 <h3>HMUARTLGW</h3>
 <ul>
-  HMUARTLGW is the Fhem module for the eQ-3 HomeMatic Wireless LAN Gateway
+  HMUARTLGW provides support for the eQ-3 HomeMatic Wireless LAN Gateway
   (HM-LGW-O-TW-W-EU) and the eQ-3 HomeMatic UART module (HM-MOD-UART), which
   is part of the HomeMatic wireless module for the Raspberry Pi
   (HM-MOD-RPI-PCB).<br>
