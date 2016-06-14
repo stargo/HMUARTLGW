@@ -133,7 +133,6 @@ sub HMUARTLGW_Initialize($)
 	                   $readingFnAttributes;
 }
 
-sub HMUARTLGW_UpdatePeerReq($;$);
 sub HMUARTLGW_SendPendingCmd($);
 sub HMUARTLGW_getAesKeys($);
 sub HMUARTLGW_updateMsgLoad($$);
@@ -540,11 +539,18 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 		$hash->{Helper}{UpdatePeer} = $peer;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
-		for (my $chan = 0; $chan < 60; $chan++) {
-			my $a = substr($hash->{Helper}{UpdatePeer}{aes}, ($chan/8)*2, 2);
-			$msg = sprintf("%02x", $chan)
-				if (!(hex($a) & (1 << ($chan % 8))));
+		my $offset = 0;
+		foreach my $c (reverse(unpack "(A2)*", $hash->{Helper}{UpdatePeer}{aes})) {
+			$c = ~hex($c);
+			for (my $chan = 0; $chan < 8; $chan++) {
+				if ($c & (1 << $chan)) {
+					Log3($hash, 4, "HMUARTLGW ${name} Disabling AES for channel " . ($chan+$offset));
+					$msg .= sprintf("%02x", $chan+$offset);
+				}
+			}
+			$offset += 8;
 		}
+
 		if (defined($msg)) {
 			$msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{UpdatePeer}{id} . ${msg};
 		} else {
@@ -553,14 +559,17 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
 		if ($peer->{operation} eq "+" && defined($peer->{aesChannels})) {
-			my $aesChannels = join("",reverse(unpack "(A2)*", $peer->{aesChannels}));
-			Log3($hash, 4, "HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
-			for (my $chan = 0; $chan < 60; $chan++) {
-				my $a = substr($aesChannels, ($chan/8)*2, 2);
-				if (hex($a) & (1 << ($chan % 8))) {
-					Log3($hash, 4, "HMUARTLGW ${name} Enabling AES for channel ${chan}");
-					$msg .= sprintf("%02x", $chan)
+			Log3($hash, 4, "HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $peer->{aesChannels}));
+			my $offset = 0;
+			foreach my $c (unpack "(A2)*", $peer->{aesChannels}) {
+				$c = hex($c);
+				for (my $chan = 0; $chan < 8; $chan++) {
+					if ($c & (1 << $chan)) {
+						Log3($hash, 4, "HMUARTLGW ${name} Enabling AES for channel " . ($chan+$offset));
+						$msg .= sprintf("%02x", $chan+$offset);
+					}
 				}
+				$offset += 8;
 			}
 		}
 
