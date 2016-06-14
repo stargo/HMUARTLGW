@@ -561,6 +561,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
 		$hash->{Helper}{KnownPeerCnt} = 0;
+		%{$hash->{Helper}{AssignedPeers}} = ();
 		$msg = HMUARTLGW_APP_GET_PEERS;
 	}
 
@@ -597,7 +598,6 @@ sub HMUARTLGW_ParsePeers($$) {
 	my ($hash, $msg) = @_;
 
 	my $peers = substr($msg, 8);
-	%{$hash->{Helper}{AssignedPeers}} = ();
 	while($peers) {
 		my $id = substr($peers, 0, 6, '');
 		my $aesChannels = substr($peers, 0, 16, '');
@@ -676,6 +676,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		$hash->{Helper}{KnownPeerCnt} = 0;
+		%{$hash->{Helper}{AssignedPeers}} = ();
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS) {
