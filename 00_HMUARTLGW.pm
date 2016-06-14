@@ -75,11 +75,10 @@ use constant {
 	HMUARTLGW_STATE_ENABLE_CSMACA      => 11,
 	HMUARTLGW_STATE_ENABLE_CREDITS     => 12,
 	HMUARTLGW_STATE_CLEAR_PEERS        => 13,
-	HMUARTLGW_STATE_CLEAR_PEERS_AES    => 14,
-	HMUARTLGW_STATE_GET_SERIAL         => 15,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 16,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 17,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 18,
+	HMUARTLGW_STATE_GET_SERIAL         => 14,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 15,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 16,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 17,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -134,6 +133,7 @@ sub HMUARTLGW_Initialize($)
 	                   $readingFnAttributes;
 }
 
+sub HMUARTLGW_UpdatePeerReq($;$);
 sub HMUARTLGW_SendPendingCmd($);
 sub HMUARTLGW_getAesKeys($);
 sub HMUARTLGW_updateMsgLoad($$);
@@ -540,24 +540,34 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 		$hash->{Helper}{UpdatePeer} = $peer;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
-		$msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{UpdatePeer}{id};
 		for (my $chan = 0; $chan < 60; $chan++) {
-			$msg .= sprintf("%02x", $chan)
-				if (!(hex($hash->{Helper}{UpdatePeer}{aes}) & (1 << $chan)));
+			my $a = substr($hash->{Helper}{UpdatePeer}{aes}, ($chan/8)*2, 2);
+			$msg = sprintf("%02x", $chan)
+				if (!(hex($a) & (1 << ($chan % 8))));
+		}
+		if (defined($msg)) {
+			$msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{UpdatePeer}{id} . ${msg};
+		} else {
+			return HMUARTLGW_GetSetParameters($hash);
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
-		$msg = HMUARTLGW_APP_PEER_ADD_AES . $peer->{id};
-
 		if ($peer->{operation} eq "+" && defined($peer->{aesChannels})) {
-			my $aesChannels = hex(join("",reverse(unpack "(A2)*", $peer->{aesChannels})));
+			my $aesChannels = join("",reverse(unpack "(A2)*", $peer->{aesChannels}));
 			Log3($hash, 4, "HMUARTLGW ${name} AESchannels: " . sprintf("%08x", $aesChannels));
 			for (my $chan = 0; $chan < 60; $chan++) {
-				if ($aesChannels & (1 << $chan)) {
+				my $a = substr($aesChannels, ($chan/8)*2, 2);
+				if (hex($a) & (1 << ($chan % 8))) {
 					Log3($hash, 4, "HMUARTLGW ${name} Enabling AES for channel ${chan}");
 					$msg .= sprintf("%02x", $chan)
 				}
 			}
+		}
+
+		if (defined($msg)) {
+			$msg = HMUARTLGW_APP_PEER_ADD_AES . $peer->{id} . $msg;
+		} else {
+			return HMUARTLGW_GetSetParameters($hash);
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
@@ -685,14 +695,6 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		$hash->{Helper}{RemovePeer} = $peer;
 		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . $peer, HMUARTLGW_DST_APP);
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS_AES) {
-		my $msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{RemovePeer};
-		for (my $chan = 0; $chan < 60; $chan++) {
-			$msg .= sprintf("%02x", $chan);
-		}
-
-		HMUARTLGW_send($hash, $msg, HMUARTLGW_DST_APP);
-
 	} elsif ($hash->{DevState} >= HMUARTLGW_STATE_UPDATE_PEER &&
 	         $hash->{DevState} <= HMUARTLGW_STATE_UPDATE_PEER_CFG) {
 		HMUARTLGW_UpdatePeerReq($hash);
@@ -814,9 +816,6 @@ sub HMUARTLGW_GetSetParameters($;$)
 			#040701010001
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
 		}
-		$hash->{DevState} = HMUARTLGW_STATE_CLEAR_PEERS_AES;
-
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_CLEAR_PEERS_AES) {
 
 		delete($hash->{Helper}{AssignedPeers}{$hash->{Helper}{RemovePeer}});
 		delete($hash->{Helper}{RemovePeer});
