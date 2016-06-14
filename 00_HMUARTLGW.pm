@@ -542,7 +542,8 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES1) {
 		$msg = HMUARTLGW_APP_PEER_REMOVE_AES . $hash->{Helper}{UpdatePeer}{id};
 		for (my $chan = 0; $chan < 60; $chan++) {
-			$msg .= sprintf("%02x", $chan);
+			$msg .= sprintf("%02x", $chan)
+				if (!(hex($hash->{Helper}{UpdatePeer}{aes}) & (1 << $chan)));
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_AES2) {
@@ -672,7 +673,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER, HMUARTLGW_DST_APP);
+		HMUARTLGW_send($hash, HMUARTLGW_APP_REMOVE_PEER . "000000", HMUARTLGW_DST_APP);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
 		$hash->{Helper}{KnownPeerCnt} = 0;
@@ -874,6 +875,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 			#040701010002fffffffffffffff9
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
 			$hash->{Helper}{AssignedPeers}{$hash->{Helper}{UpdatePeer}->{id}} = substr($msg, 12);
+			$hash->{Helper}{UpdatePeer}{aes} = substr($msg, 12);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_AES1;
 
