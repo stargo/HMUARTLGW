@@ -478,9 +478,9 @@ sub HMUARTLGW_SendPendingCmd($)
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
 			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 15) {
-				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet");
-				shift(@{$hash->{Helper}{PendingCMD}});
+				my $oldmsg = shift(@{$hash->{Helper}{PendingCMD}});
 				delete($hash->{Helper}{RetryCnt});
+				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 ${oldmsg}");
 				#try next command
 				return HMUARTLGW_SendPendingCmd($hash);
 			} elsif ($hash->{Helper}{RetryCnt}) {
