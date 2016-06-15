@@ -242,6 +242,7 @@ sub HMUARTLGW_Undefine($$;$)
 	}
 
 	DevIo_CloseDev($hash) if (!$noclose);
+	$hash->{DevState} = HMUARTLGW_STATE_NONE;
 }
 
 sub HMUARTLGW_Reopen($;$)
