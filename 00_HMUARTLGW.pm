@@ -48,7 +48,7 @@ use constant {
 	HMUARTLGW_ACK_EUNKNOWN             => "04",
 	HMUARTLGW_ACK_ENOCREDITS           => "05",
 	HMUARTLGW_ACK_ECSMACA              => "06",
-	HMUARTLGW_ACK_WITH_DATA            => "07",
+	HMUARTLGW_ACK_WITH_MULTIPART_DATA  => "07", #04 07 XX YY: part XX of YY
 	HMUARTLGW_ACK_EINPROGRESS          => "08",
 	HMUARTLGW_ACK_WITH_RESPONSE_AES_OK => "0C",
 	HMUARTLGW_ACK_WITH_RESPONSE_AES_KO => "0D",
@@ -69,15 +69,14 @@ use constant {
 	HMUARTLGW_STATE_SET_HMID           => 5,
 	HMUARTLGW_STATE_GET_HMID           => 6,
 	HMUARTLGW_STATE_GET_DEFAULT_HMID   => 7,
-	HMUARTLGW_STATE_GET_PEERCNT        => 8,
-	HMUARTLGW_STATE_GET_PEERS          => 9,
-	HMUARTLGW_STATE_GET_FIRMWARE       => 10,
-	HMUARTLGW_STATE_ENABLE_CSMACA      => 11,
-	HMUARTLGW_STATE_ENABLE_CREDITS     => 12,
-	HMUARTLGW_STATE_GET_SERIAL         => 13,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 14,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 15,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 16,
+	HMUARTLGW_STATE_GET_PEERS          => 8,
+	HMUARTLGW_STATE_GET_FIRMWARE       => 9,
+	HMUARTLGW_STATE_ENABLE_CSMACA      => 10,
+	HMUARTLGW_STATE_ENABLE_CREDITS     => 11,
+	HMUARTLGW_STATE_GET_SERIAL         => 12,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 13,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 14,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 15,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -579,7 +578,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
-		$hash->{Helper}{KnownPeerCnt} = 0;
+		$hash->{AssignedPeerCnt} = 0;
 		%{$hash->{Helper}{AssignedPeers}} = ();
 		$msg = HMUARTLGW_APP_GET_PEERS;
 	}
@@ -625,7 +624,7 @@ sub HMUARTLGW_ParsePeers($$) {
 		     "HMUARTLGW $hash->{NAME} known peer: ${id}, aesChannels: ${aesChannels}, flags: ${flags}");
 
 		$hash->{Helper}{AssignedPeers}{$id} = "$aesChannels (flags: ${flags})";
-		$hash->{Helper}{KnownPeerCnt}++;
+		$hash->{AssignedPeerCnt}++;
 	}
 }
 
@@ -690,11 +689,8 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		delete($hash->{Helper}{AESKeyQueue});
 		HMUARTLGW_send($hash, HMUARTLGW_APP_SET_TEMP_KEY . ($key?$key:"00"x17), HMUARTLGW_DST_APP);
 
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
-		HMUARTLGW_send($hash, HMUARTLGW_APP_ADD_PEER . "000001000000", HMUARTLGW_DST_APP);
-
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
-		$hash->{Helper}{KnownPeerCnt} = 0;
+		$hash->{AssignedPeerCnt} = 0;
 		%{$hash->{Helper}{AssignedPeers}} = ();
 		HMUARTLGW_send($hash, HMUARTLGW_APP_GET_PEERS, HMUARTLGW_DST_APP);
 
@@ -742,14 +738,14 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_GET_HMID;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_HMID) {
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		if ($ack eq HMUARTLGW_ACK_WITH_MULTIPART_DATA) {
 			readingsSingleUpdate($hash, "D-HMIdAssigned", uc(substr($msg, 8)), 1);
 			$hash->{owner} = uc(substr($msg, 8));
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_GET_DEFAULT_HMID;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_DEFAULT_HMID) {
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		if ($ack eq HMUARTLGW_ACK_WITH_MULTIPART_DATA) {
 			readingsSingleUpdate($hash, "D-HMIdOriginal", uc(substr($msg, 8)), 1);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_SET_TIME;
@@ -786,25 +782,21 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_SET_TEMP_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_TEMP_KEY) {
-		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERCNT;
-
-	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERCNT) {
-		$hash->{AssignedPeerCnt} = 0;
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
-			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
-		}
 		$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_PEERS) {
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		if ($ack eq HMUARTLGW_ACK_WITH_MULTIPART_DATA) {
+			#04070207...
 			HMUARTLGW_ParsePeers($hash, $msg);
-		}
-		if ($hash->{Helper}{KnownPeerCnt} < $hash->{AssignedPeerCnt}) {
-			#there will be more answer messages
-			$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
-			RemoveInternalTimer($hash);
-			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
-			return;
+
+			#more parts in multipart message?
+			if (hex(substr($msg, 4, 2)) < hex(substr($msg, 6, 2))) {
+				#there will be more answer messages
+				$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
+				RemoveInternalTimer($hash);
+				InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				return;
+			}
 		}
 
 		if (defined($hash->{Helper}{AssignedPeers}) &&
@@ -861,7 +853,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
 		$hash->{AssignedPeerCnt} = 0;
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		if ($ack eq HMUARTLGW_ACK_WITH_MULTIPART_DATA) {
 			#040701010002fffffffffffffff9
 			$hash->{AssignedPeerCnt} = hex(substr($msg, 8, 4));
 			if (length($msg) > 12) {
@@ -901,20 +893,21 @@ sub HMUARTLGW_GetSetParameters($;$)
 		}
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER_CFG) {
-		if ($ack eq HMUARTLGW_ACK_WITH_DATA) {
+		if ($ack eq HMUARTLGW_ACK_WITH_MULTIPART_DATA) {
 			HMUARTLGW_ParsePeers($hash, $msg);
+
+			#more parts in multipart message?
+			if (hex(substr($msg, 4, 2)) < hex(substr($msg, 6, 2))) {
+				#there will be more messages
+				$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
+				RemoveInternalTimer($hash);
+				InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				return;
+			}
 		}
 
-		if ($hash->{Helper}{KnownPeerCnt} < $hash->{AssignedPeerCnt}) {
-			#there will be more messages
-			$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
-			RemoveInternalTimer($hash);
-			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
-			return;
-		} else {
-			delete($hash->{Helper}{UpdatePeer});
-			$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
-		}
+		delete($hash->{Helper}{UpdatePeer});
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 	}
 
 	#Don't continue in state-machine if only one parameter should be
