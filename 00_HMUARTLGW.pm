@@ -88,6 +88,9 @@ use constant {
 	HMUARTLGW_STATE_SEND               => 100,
 	HMUARTLGW_STATE_SEND_NOACK         => 101,
 	HMUARTLGW_STATE_SEND_TIMED         => 102,
+
+	HMUARTLGW_CMD_TIMEOUT              => 10,
+	HMUARTLGW_SEND_TIMEOUT             => 10,
 };
 
 my %sets = (
@@ -366,7 +369,7 @@ sub HMUARTLGW_LGW_HandleKeepAlive($)
 
 			$msg = "K%02x\r\n";
 
-			InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+			InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 		} elsif ($line =~ m/^>K(..)/) {
 			$hash->{DEVCNT} = hex($1);
 			RemoveInternalTimer($hash);
@@ -394,7 +397,7 @@ sub HMUARTLGW_SendKeepAlive($)
 	$hash->{DevState} = HMUARTLGW_STATE_KEEPALIVE_SENT;
 	HMUARTLGW_sendAscii($hash, "K%02x\r\n");
 
-	InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+	InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 
 	return;
 }
@@ -490,7 +493,7 @@ sub HMUARTLGW_SendPendingCmd($)
 			RemoveInternalTimer($hash);
 
 			if (hex(substr($cmd, 10, 2)) & (1 << 5)) { #BIDI
-				InternalTimer(gettimeofday()+10, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				InternalTimer(gettimeofday()+HMUARTLGW_SEND_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND;
 			} else {
 				Log3($hash, 5, "HMUARTLGW ${name} !BIDI");
@@ -586,7 +589,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 	if ($msg) {
 		HMUARTLGW_send($hash, $msg, HMUARTLGW_DST_APP);
 		RemoveInternalTimer($hash);
-		InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+		InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 	}
 }
 
@@ -706,7 +709,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		return;
 	}
 
-	InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+	InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 }
 
 sub HMUARTLGW_GetSetParameters($;$)
@@ -795,7 +798,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 				#there will be more answer messages
 				$hash->{DevState} = HMUARTLGW_STATE_GET_PEERS;
 				RemoveInternalTimer($hash);
-				InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				return;
 			}
 		}
@@ -902,7 +905,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 				#there will be more messages
 				$hash->{DevState} = HMUARTLGW_STATE_UPDATE_PEER_CFG;
 				RemoveInternalTimer($hash);
-				InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+				InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				return;
 			}
 		}
@@ -994,7 +997,7 @@ sub HMUARTLGW_Parse($$$)
 					$hash->{DevState} = HMUARTLGW_STATE_ENTER_APP;
 					HMUARTLGW_send($hash, HMUARTLGW_OS_CHANGE_APP, HMUARTLGW_DST_OS);
 					RemoveInternalTimer($hash);
-					InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+					InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				}
 			} elsif ($ack eq HMUARTLGW_ACK_NACK && $hash->{DevState} == HMUARTLGW_STATE_ENTER_APP) {
 				Log3($hash, 1, "HMUARTLGW ${name} application switch failed, application-firmware probably corrupted!");
@@ -1365,7 +1368,7 @@ sub HMUARTLGW_StartInit($)
 
 	RemoveInternalTimer($hash);
 
-	InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCmdResp", $hash, 0);
+	InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 
 	if ($hash->{DevType} eq "LGW-KeepAlive") {
 		$hash->{DevState} = HMUARTLGW_STATE_KEEPALIVE_INIT;
