@@ -164,7 +164,7 @@ sub HMUARTLGW_DoInit($)
 
 	$hash->{LGW_Init} = 1 if ($hash->{DevType} =~ m/^LGW/);
 
-	$hash->{Helper}{log} = [ split(/,/, AttrVal($name, "logIDs", "sys,all")) ];
+	$hash->{Helper}{log} = [ split(/,/, AttrVal($name, "logIDs", "")) ];
 
 	RemoveInternalTimer($hash);
 
