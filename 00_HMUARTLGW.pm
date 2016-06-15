@@ -161,7 +161,7 @@ sub HMUARTLGW_DoInit($)
 
 	$hash->{LGW_Init} = 1 if ($hash->{DevType} =~ m/^LGW/);
 
-	$hash->{Helper}{log} = [ split(/,/, AttrVal($name, "logIDs", "")) ];
+	$hash->{Helper}{log} = [ split(/,/, AttrVal($name, "logIDs", "sys,all")) ];
 
 	RemoveInternalTimer($hash);
 
@@ -720,6 +720,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 	RemoveInternalTimer($hash);
 
 	Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} GetSet Ack: ${ack}, state ".$hash->{DevState}) if ($ack);
+	Log3($hash, 1, "HMUARTLGW ${name} GetSet NACK: ${ack}, state ".$hash->{DevState}) if ($ack && $ack =~ m/^0400/);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
 		#Retry
