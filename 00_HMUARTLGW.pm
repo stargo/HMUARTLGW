@@ -960,7 +960,8 @@ sub HMUARTLGW_Parse($$$)
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
-		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping. We: $hash->{CNT}, device: $hash->{DEVCNT}");
+		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping. We: $hash->{CNT}, device: $hash->{DEVCNT}, " .
+		               "state: $hash->{DevState}, msg: ${dst} ${msg}");
 		return;
 	}
 
