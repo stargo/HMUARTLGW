@@ -1744,18 +1744,19 @@ sub HMUARTLGW_updateMsgLoad($$) {
 
 	if ((!defined($hash->{Helper}{loadLvl}{lastHistory})) ||
 	    ($hash->{Helper}{loadLvl}{lastHistory} + $histSlice) <= gettimeofday()) {
-		push @{$hash->{Helper}{loadLvl}{history}}, $adjustedLoad;
-		shift @{$hash->{Helper}{loadLvl}{history}} while (scalar(@{$hash->{Helper}{loadLvl}{history}}) > ($histNo + 1));
+		my @abshist = ("-") x $histNo;
+		unshift @abshist, split("/", $hash->{msgLoadHistoryAbs}) if (defined($hash->{msgLoadHistoryAbs}));
+		unshift @abshist, $adjustedLoad;
 
 		my $last;
 		my @hist = ("-") x $histNo;
-		foreach my $l (@{$hash->{Helper}{loadLvl}{history}}) {
+		foreach my $l (reverse(@abshist)) {
+			next if ($l eq "-");
 			unshift @hist, $l - $last if (defined($last));
 			$last = $l;
 		}
 		$hash->{msgLoadHistory} = join("/", @hist[0..($histNo - 1)]);
-		my @abshist = (("-") x $histNo, @{$hash->{Helper}{loadLvl}{history}});
-		$hash->{msgLoadHistoryAbs} = join("/", (reverse(@abshist))[0..($histNo - 1)]);
+		$hash->{msgLoadHistoryAbs} = join("/", @abshist[0..($histNo)]);
 		if (!defined($hash->{Helper}{loadLvl}{lastHistory})) {
 			$hash->{Helper}{loadLvl}{lastHistory} = gettimeofday();
 		} else {
