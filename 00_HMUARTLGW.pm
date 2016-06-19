@@ -162,6 +162,8 @@ sub HMUARTLGW_DoInit($)
 	delete($hash->{AssignedPeerCnt});
 	delete($hash->{msgLoadCurrent});
 	delete($hash->{msgLoadCurrentRaw});
+	delete($hash->{msgLoadHistory});
+	delete($hash->{msgLoadHistoryAbs});
 	delete($hash->{FW});
 	delete($hash->{owner});
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
@@ -1694,7 +1696,7 @@ sub HMUARTLGW_updateCondition($)
 			$cond = "Warning-HighLoad";
 			$loadLvl = "high";
 		} elsif ($load >= 40) {
-			#FIXME: batchLevel != 40 needs to be in {helper}{bl}
+			#FIXME: batchLevel != 40 needs to be in {helper}{loadLvl}{bl}
 			$loadLvl = "batchLevel";
 		} else {
 			$loadLvl = "low";
@@ -1735,10 +1737,36 @@ sub HMUARTLGW_updateMsgLoad($$) {
 		}
 	}
 
+	my $adjustedLoad = int(($load + 1) / 2);
+
+	my $histSlice = 5 * 60;
+	my $histNo = 3600 / $histSlice;
+
+	if ((!defined($hash->{Helper}{loadLvl}{lastHistory})) ||
+	    ($hash->{Helper}{loadLvl}{lastHistory} + $histSlice) <= gettimeofday()) {
+		push @{$hash->{Helper}{loadLvl}{history}}, $adjustedLoad;
+		shift @{$hash->{Helper}{loadLvl}{history}} while (scalar(@{$hash->{Helper}{loadLvl}{history}}) > ($histNo + 1));
+
+		my $last;
+		my @hist = ("-") x $histNo;
+		foreach my $l (@{$hash->{Helper}{loadLvl}{history}}) {
+			unshift @hist, $l - $last if (defined($last));
+			$last = $l;
+		}
+		$hash->{msgLoadHistory} = join("/", @hist[0..($histNo - 1)]);
+		my @abshist = (("-") x $histNo, @{$hash->{Helper}{loadLvl}{history}});
+		$hash->{msgLoadHistoryAbs} = join("/", (reverse(@abshist))[0..($histNo - 1)]);
+		if (!defined($hash->{Helper}{loadLvl}{lastHistory})) {
+			$hash->{Helper}{loadLvl}{lastHistory} = gettimeofday();
+		} else {
+			$hash->{Helper}{loadLvl}{lastHistory} += $histSlice;
+		}
+	}
+
 	if ((!defined($hash->{msgLoadCurrentRaw})) ||
 	    $hash->{msgLoadCurrentRaw} != $load) {
 		$hash->{msgLoadCurrentRaw} = $load;
-		$hash->{msgLoadCurrent} = int(($load + 1) / 2);
+		$hash->{msgLoadCurrent} = $adjustedLoad;
 		HMUARTLGW_updateCondition($hash);
 	}
 }
