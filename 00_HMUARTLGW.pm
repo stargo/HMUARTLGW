@@ -138,6 +138,7 @@ sub HMUARTLGW_Initialize($)
 }
 
 sub HMUARTLGW_SendPendingCmd($);
+sub HMUARTLGW_SendCmd($$);
 sub HMUARTLGW_getAesKeys($);
 sub HMUARTLGW_updateMsgLoad($$);
 sub HMUARTLGW_Read($);
@@ -529,6 +530,14 @@ sub HMUARTLGW_SendPendingTimer($)
 	my ($hash) = @_;
 
 	$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+	return HMUARTLGW_SendPendingCmd($hash);
+}
+
+sub HMUARTLGW_SendCmd($$)
+{
+	my ($hash, $cmd) = @_;
+
+	push @{$hash->{Helper}{PendingCMD}}, $cmd;
 	return HMUARTLGW_SendPendingCmd($hash);
 }
 
@@ -1275,9 +1284,9 @@ sub HMUARTLGW_Read($)
 	}
 }
 
-sub HMUARTLGW_Write($$$;$)
+sub HMUARTLGW_Write($$$)
 {
-	my ($hash, $fn, $msg, $first) = @_;
+	my ($hash, $fn, $msg) = @_;
 	my $name = $hash->{NAME};
 
 	if($msg =~ m/init:(......)/) {
@@ -1326,9 +1335,9 @@ sub HMUARTLGW_Write($$$;$)
 		my $speed = hex($1);
 
 		if ($speed == 100) {
-			push @{$hash->{Helper}{PendingCMD}}, "UpdateMode";
+			HMUARTLGW_SendCmd($hash, "UpdateMode");
 		} else {
-			push @{$hash->{Helper}{PendingCMD}}, "NormalMode";
+			HMUARTLGW_SendCmd($hash, "NormalMode");
 		}
 	} elsif (length($msg) > 21) {
 		my ($mtype,$src,$dst) = (substr($msg, 8, 2),
@@ -1375,13 +1384,8 @@ sub HMUARTLGW_Write($$$;$)
 
 		$cmd .= substr($msg, 4);
 
-		if ($first) {
-			unshift @{$hash->{Helper}{PendingCMD}}, $cmd;
-		} else {
-			push @{$hash->{Helper}{PendingCMD}}, $cmd;
-		}
-		push @{$hash->{Helper}{PendingCMD}}, "Credits" if ((++$hash->{Helper}{SendCnt} % 10) == 0);
-		HMUARTLGW_SendPendingCmd($hash);
+		HMUARTLGW_SendCmd($hash, $cmd);
+		HMUARTLGW_SendCmd($hash, "Credits") if ((++$hash->{Helper}{SendCnt} % 10) == 0);
 
 		# Check queue again
 		if ($hash->{Helper}{PendingCMD} &&
@@ -1555,8 +1559,7 @@ sub HMUARTLGW_Attr(@)
 			$attr{$name}{$aName} = $aVal;
 
 			if ($init_done) {
-				push @{$hash->{Helper}{PendingCMD}}, "HMID";
-				HMUARTLGW_SendPendingCmd($hash);
+				HMUARTLGW_SendCmd($hash, "HMID");
 			}
 		}
 	} elsif ($aName eq "lgwPw") {
@@ -1595,8 +1598,7 @@ sub HMUARTLGW_Attr(@)
 		}
 
 		if ($init_done) {
-			push @{$hash->{Helper}{PendingCMD}}, "DutyCycle";
-			HMUARTLGW_SendPendingCmd($hash);
+			HMUARTLGW_SendCmd($hash, "DutyCycle");
 		}
 	} elsif ($aName eq "csmaCa") {
 		if ($cmd eq "set") {
@@ -1608,8 +1610,7 @@ sub HMUARTLGW_Attr(@)
 		}
 
 		if ($init_done) {
-			push @{$hash->{Helper}{PendingCMD}}, "CSMACA";
-			HMUARTLGW_SendPendingCmd($hash);
+			HMUARTLGW_SendCmd($hash, "CSMACA");
 		}
 	} elsif ($aName eq "qLen") {
 		if ($cmd eq "set") {
@@ -1666,7 +1667,7 @@ sub HMUARTLGW_writeAesKey($) {
 	return if (!$name || !$defs{$name} || $defs{$name}{TYPE} ne "HMUARTLGW");
 	my $hash = $defs{$name};
 
-	push @{$hash->{Helper}{PendingCMD}}, "AESkeys";
+	HMUARTLGW_SendCmd($hash, "AESkeys");
 	HMUARTLGW_SendPendingCmd($hash);
 }
 
