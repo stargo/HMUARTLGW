@@ -73,10 +73,11 @@ use constant {
 	HMUARTLGW_STATE_GET_SERIAL         => 9,
 	HMUARTLGW_STATE_ENABLE_CSMACA      => 10,
 	HMUARTLGW_STATE_ENABLE_CREDITS     => 11,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 12,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 13,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 14,
-	HMUARTLGW_STATE_GET_PEERS          => 15,
+	HMUARTLGW_STATE_GET_INIT_CREDITS   => 12,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 13,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 14,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 15,
+	HMUARTLGW_STATE_GET_PEERS          => 16,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
@@ -243,6 +244,7 @@ sub HMUARTLGW_Undefine($$;$)
 
 	DevIo_CloseDev($hash) if (!$noclose);
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
+	HMUARTLGW_updateCondition($hash);
 }
 
 sub HMUARTLGW_Reopen($;$)
@@ -676,6 +678,9 @@ sub HMUARTLGW_GetSetParameterReq($) {
 
 		HMUARTLGW_send($hash, HMUARTLGW_OS_ENABLE_CREDITS . sprintf("%02x", $dutyCycle), HMUARTLGW_DST_OS);
 
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_INIT_CREDITS) {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_CREDITS, HMUARTLGW_DST_OS);
+
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
 		#current key is key with highest idx
 		@{$hash->{Helper}{AESKeyQueue}} = HMUARTLGW_getAesKeys($hash);
@@ -778,6 +783,13 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CREDITS) {
+		$hash->{DevState} = HMUARTLGW_STATE_GET_INIT_CREDITS;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_INIT_CREDITS) {
+		if ($ack eq HMUARTLGW_ACK_INFO) {
+			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
+		}
+
 		$hash->{DevState} = HMUARTLGW_STATE_SET_CURRENT_KEY;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_CURRENT_KEY) {
@@ -854,6 +866,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 		InternalTimer(gettimeofday()+1, "HMUARTLGW_CheckCredits", "HMUARTLGW_CheckCredits:$name", 1);
 
 		$hash->{Helper}{Initialized} = 1;
+		HMUARTLGW_updateCondition($hash);
 	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_UPDATE_PEER) {
@@ -1065,6 +1078,7 @@ sub HMUARTLGW_Parse($$$)
 			} elsif ($ack eq HMUARTLGW_ACK_ENOCREDITS) {
 				Log3($hash, 1, "HMUARTLGW ${name} IO in overload!");
 				$hash->{XmitOpen} = 0;
+				HMUARTLGW_updateCondition($hash);
 			} elsif ($ack eq HMUARTLGW_ACK_ECSMACA && $oldMsg) {
 				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 				     "HMUARTLGW ${name} can't send due to CSMA/CA, trying again in a bit");
@@ -1388,6 +1402,7 @@ sub HMUARTLGW_StartInit($)
 
 	$hash->{DevState} = HMUARTLGW_STATE_QUERY_APP;
 	HMUARTLGW_send($hash, HMUARTLGW_OS_GET_APP, HMUARTLGW_DST_OS);
+	HMUARTLGW_updateCondition($hash);
 
 	return;
 }
@@ -1399,7 +1414,7 @@ sub HMUARTLGW_CheckCmdResp($)
 
 	RemoveInternalTimer($hash);
 
-	#The data we wait for might have already be received but never
+	#The data we wait for might have already been received but never
 	#read from the FD. Do a last check now and process new data.
 	my $rin = '';
 	vec($rin, $hash->{FD}, 1) = 1;
@@ -1628,6 +1643,61 @@ sub HMUARTLGW_writeAesKey($) {
 	HMUARTLGW_SendPendingCmd($hash);
 }
 
+sub HMUARTLGW_updateCondition($)
+{
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+	my $cond = "disconnected";
+	my $loadLvl = "suspended";
+
+	my $oldLoad = ReadingsVal($name, "load", -1);
+	if (defined($hash->{msgLoadCurrent})) {
+		my $load = int(($hash->{msgLoadCurrent} + 1) / 2);
+
+		readingsSingleUpdate($hash, "load", $load, 0);
+
+		$cond = "ok";
+		#FIXME: Dynamic ;evels
+		if ($load >= 100) {
+			$cond = "ERROR-Overload";
+			$loadLvl = "suspended";
+		} elsif ($oldLoad >= 100) {
+			$cond = "Overload-released";
+			$loadLvl = "high";
+		} elsif ($load >= 90) {
+			$cond = "Warning-HighLoad";
+			$loadLvl = "high";
+		} elsif ($load >= 40) {
+			#FIXME: batchLevel != 40 needs to be in {helper}{bl}
+			$loadLvl = "batchLevel";
+		} else {
+			$loadLvl = "low";
+		}
+	}
+
+	if ((!defined($hash->{XmitOpen})) || $hash->{XmitOpen} == 0) {
+		$cond = "ERROR-Overload";
+		$loadLvl = "suspended";
+	}
+
+	if (!defined($hash->{Helper}{Initialized})) {
+		$cond = "init";
+		$loadLvl = "suspended";
+	}
+
+	if ($hash->{DevState} == HMUARTLGW_STATE_NONE) {
+		$cond = "disconnected";
+		$loadLvl = "suspended";
+	}
+
+	readingsBeginUpdate($hash);
+	readingsBulkUpdate($hash, "cond", $cond)
+	    if (defined($cond) && $cond ne ReadingsVal($name, "cond", ""));
+	readingsBulkUpdate($hash, "loadLvl", $loadLvl)
+	    if (defined($loadLvl) && $loadLvl ne ReadingsVal($name, "loadLvl", ""));
+	readingsEndUpdate($hash, 1);
+}
+
 sub HMUARTLGW_updateMsgLoad($$) {
 	my ($hash, $load) = @_;
 
@@ -1638,7 +1708,11 @@ sub HMUARTLGW_updateMsgLoad($$) {
 			$hash->{XmitOpen} = 1;
 		}
 	}
-	$hash->{msgLoadCurrent} = $load;
+	if ((!defined($hash->{msgLoadCurrent})) ||
+	    $hash->{msgLoadCurrent} != $load) {
+		$hash->{msgLoadCurrent} = $load;
+		HMUARTLGW_updateCondition($hash);
+	}
 }
 
 sub HMUARTLGW_send($$$)
