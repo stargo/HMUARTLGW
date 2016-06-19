@@ -455,43 +455,43 @@ sub HMUARTLGW_SendPendingCmd($)
 	    @{$hash->{Helper}{PendingCMD}}) {
 		my $cmd = $hash->{Helper}{PendingCMD}->[0];
 
-		if ($cmd eq "AESkeys") {
+		if ($cmd->{cmd} eq "AESkeys") {
 			Log3($hash, 5, "HMUARTLGW ${name} setting keys");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_CURRENT_KEY;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "Credits") {
+		} elsif ($cmd->{cmd} eq "Credits") {
 			Log3($hash, 5, "HMUARTLGW ${name} checking credits (from send)");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_GET_CREDITS;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "HMID") {
+		} elsif ($cmd->{cmd} eq "HMID") {
 			Log3($hash, 5, "HMUARTLGW ${name} setting hmId");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_HMID;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "DutyCycle") {
+		} elsif ($cmd->{cmd} eq "DutyCycle") {
 			Log3($hash, 5, "HMUARTLGW ${name} Enabling/Disabling DutyCycle");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CREDITS;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "CSMACA") {
+		} elsif ($cmd->{cmd} eq "CSMACA") {
 			Log3($hash, 5, "HMUARTLGW ${name} Enabling/Disabling CSMA/CA");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "UpdateMode") {
+		} elsif ($cmd->{cmd} eq "UpdateMode") {
 			Log3($hash, 5, "HMUARTLGW ${name} Entering HM update mode (100k)");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_UPDATE_MODE;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
-		} elsif ($cmd eq "NormalMode") {
+		} elsif ($cmd->{cmd} eq "NormalMode") {
 			Log3($hash, 5, "HMUARTLGW ${name} Entering HM normal mode (10k)");
 			$hash->{Helper}{OneParameterOnly} = 1;
 			$hash->{DevState} = HMUARTLGW_STATE_SET_NORMAL_MODE;
@@ -499,19 +499,19 @@ sub HMUARTLGW_SendPendingCmd($)
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
-			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 15) {
+			if (defined($cmd->{RetryCnt}) && $cmd->{RetryCnt} >= 15) {
 				my $oldmsg = shift(@{$hash->{Helper}{PendingCMD}});
 				delete($hash->{Helper}{RetryCnt});
-				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 ${oldmsg}");
+				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 $oldmsg->{cmd}");
 				#try next command
 				return HMUARTLGW_SendPendingCmd($hash);
-			} elsif ($hash->{Helper}{RetryCnt}) {
-				Log3($hash, 5, "HMUARTLGW ${name} Retry: ".$hash->{Helper}{RetryCnt});
+			} elsif ($cmd->{RetryCnt}) {
+				Log3($hash, 1, "HMUARTLGW ${name} Retry: ".$cmd->{RetryCnt});
 			}
 
 			RemoveInternalTimer($hash);
 
-			if (hex(substr($cmd, 10, 2)) & (1 << 5)) { #BIDI
+			if (hex(substr($cmd->{cmd}, 10, 2)) & (1 << 5)) { #BIDI
 				InternalTimer(gettimeofday()+HMUARTLGW_SEND_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND;
 			} else {
@@ -520,7 +520,7 @@ sub HMUARTLGW_SendPendingCmd($)
 				$hash->{DevState} = HMUARTLGW_STATE_SEND_NOACK;
 			}
 
-			HMUARTLGW_send($hash, $cmd, HMUARTLGW_DST_APP);
+			$cmd->{CNT} = HMUARTLGW_send($hash, $cmd->{cmd}, HMUARTLGW_DST_APP);
 		}
 	}
 }
@@ -537,7 +537,7 @@ sub HMUARTLGW_SendCmd($$)
 {
 	my ($hash, $cmd) = @_;
 
-	push @{$hash->{Helper}{PendingCMD}}, $cmd;
+	push @{$hash->{Helper}{PendingCMD}}, { cmd => $cmd };
 	return HMUARTLGW_SendPendingCmd($hash);
 }
 
@@ -1092,10 +1092,10 @@ sub HMUARTLGW_Parse($$$)
 				} elsif ($oldMsg) {
 					#Need to produce our own "failed" challenge
 					$recv = substr($msg, 0, 6) . "01" .
-					        substr($oldMsg, 8, 2) .
+					        substr($oldMsg->{cmd}, 8, 2) .
 					        "A002" .
-					        substr($oldMsg, 20, 6) .
-					        substr($oldMsg, 14, 6) .
+					        substr($oldMsg->{cmd}, 20, 6) .
+					        substr($oldMsg->{cmd}, 14, 6) .
 					        "04000000000000" .
 					        sprintf("%02X", hex(substr($msg, 4, 2))*2);
 				}
@@ -1106,7 +1106,7 @@ sub HMUARTLGW_Parse($$$)
 				     "HMUARTLGW ${name} IO currently busy, trying again in a bit");
 
 				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
-					$hash->{Helper}{RetryCnt}++;
+					$oldMsg->{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
 					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
@@ -1122,7 +1122,7 @@ sub HMUARTLGW_Parse($$$)
 				     "HMUARTLGW ${name} can't send due to CSMA/CA, trying again in a bit");
 
 				if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING) {
-					$hash->{Helper}{RetryCnt}++;
+					$oldMsg->{RetryCnt}++;
 					RemoveInternalTimer($hash);
 					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
 					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
@@ -1138,7 +1138,6 @@ sub HMUARTLGW_Parse($$$)
 				$recv = $msg;
 			}
 
-			delete($hash->{Helper}{RetryCnt});
 			HMUARTLGW_UpdateQueuedPeer($hash);
 			HMUARTLGW_SendPendingCmd($hash);
 		} elsif ($msg =~ m/^(05.*)$/) {
@@ -1460,12 +1459,11 @@ sub HMUARTLGW_CheckCmdResp($)
 	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_SEND) {
-		$hash->{Helper}{RetryCnt} += 5;
+		$hash->{Helper}{PendingCMD}->[0]->{RetryCnt} += 5;
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
 		shift(@{$hash->{Helper}{PendingCMD}});
-		delete($hash->{Helper}{RetryCnt});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
@@ -1788,6 +1786,8 @@ sub HMUARTLGW_send($$$)
 	$frame .= pack("n", HMUARTLGW_crc16($frame));
 
 	HMUARTLGW_send_frame($hash, $frame);
+
+	return $hash->{CNT};
 }
 
 sub HMUARTLGW_send_frame($$)
