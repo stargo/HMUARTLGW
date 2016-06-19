@@ -160,6 +160,7 @@ sub HMUARTLGW_DoInit($)
 	delete($hash->{Helper});
 	delete($hash->{AssignedPeerCnt});
 	delete($hash->{msgLoadCurrent});
+	delete($hash->{msgLoadCurrentRaw});
 	delete($hash->{FW});
 	delete($hash->{owner});
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
@@ -1688,7 +1689,7 @@ sub HMUARTLGW_updateCondition($)
 
 	my $oldLoad = ReadingsVal($name, "load", -1);
 	if (defined($hash->{msgLoadCurrent})) {
-		my $load = int(($hash->{msgLoadCurrent} + 1) / 2);
+		my $load = $hash->{msgLoadCurrent};
 
 		readingsSingleUpdate($hash, "load", $load, 0);
 
@@ -1744,9 +1745,11 @@ sub HMUARTLGW_updateMsgLoad($$) {
 			$hash->{XmitOpen} = 1;
 		}
 	}
-	if ((!defined($hash->{msgLoadCurrent})) ||
-	    $hash->{msgLoadCurrent} != $load) {
-		$hash->{msgLoadCurrent} = $load;
+
+	if ((!defined($hash->{msgLoadCurrentRaw})) ||
+	    $hash->{msgLoadCurrentRaw} != $load) {
+		$hash->{msgLoadCurrentRaw} = $load;
+		$hash->{msgLoadCurrent} = int(($load + 1) / 2);
 		HMUARTLGW_updateCondition($hash);
 	}
 }
