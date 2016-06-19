@@ -1123,18 +1123,6 @@ sub HMUARTLGW_Parse($$$)
 			} elsif ($ack eq HMUARTLGW_ACK_EUNKNOWN && $oldMsg) {
 				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 				     "HMUARTLGW ${name} can't send due to unknown problem (no response?)");
-
-				if (substr($oldMsg, 12, 2) eq "01" &&
-				    $hash->{DevState} == HMUARTLGW_STATE_RUNNING) { #retry config-packets only
-					Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
-					     "HMUARTLGW ${name} retrying config-packet");
-					$hash->{Helper}{RetryCnt} += 5;
-					RemoveInternalTimer($hash);
-					unshift @{$hash->{Helper}{PendingCMD}}, $oldMsg;
-					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
-					InternalTimer(gettimeofday()+0.2, "HMUARTLGW_SendPendingTimer", $hash, 0);
-				}
-				return;
 			} else {
 				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 				     "HMUARTLGW ${name} Ack: ${ack} ".(($2)?$2:""));
