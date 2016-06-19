@@ -1713,8 +1713,7 @@ sub HMUARTLGW_send_frame($$)
 	my $n = select($rin, undef, undef, 0);
 	if ($n > 0) {
 		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
-		     "HMUARTLGW ${name} send: FD is readable! This might corrupt the received frame, so processing data now");
-		HMUARTLGW_Read($hash);
+		     "HMUARTLGW ${name} send: FD is readable! This might corrupt the received frame!");
 	}
 
 	DevIo_SimpleWrite($hash, $escaped, 0);
