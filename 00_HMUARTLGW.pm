@@ -1360,9 +1360,12 @@ sub HMUARTLGW_Write($$$;$)
 		#Queue full?
 		if ($hash->{Helper}{PendingCMD} &&
 		    scalar(@{$hash->{Helper}{PendingCMD}}) >= $qLen) {
-			Log3($hash, 1, "HMUARTLGW ${name}: queue is full, dropping packet");
-			$hash->{XmitOpen} = 2 if ($hash->{XmitOpen} == 1);
-			return;
+			if ($hash->{XmitOpen} == 2) {
+				Log3($hash, 1, "HMUARTLGW ${name}: queue is full, dropping packet");
+				return;
+			} elsif ($hash->{XmitOpen} == 1) {
+				$hash->{XmitOpen} = 2;
+			}
 		}
 
 		if (!$hash->{Peers}{$dst} && $dst ne "000000"){
@@ -1396,7 +1399,6 @@ sub HMUARTLGW_Write($$$;$)
 		if ($hash->{Helper}{PendingCMD} &&
 		    scalar(@{$hash->{Helper}{PendingCMD}}) >= $qLen) {
 			$hash->{XmitOpen} = 2 if ($hash->{XmitOpen} == 1);
-			return;
 		}
 	} else {
 		Log3($hash, 1, "HMUARTLGW ${name} write:${fn} ${msg}");
