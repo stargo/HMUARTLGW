@@ -71,17 +71,19 @@ use constant {
 	HMUARTLGW_STATE_SET_TIME           => 7,
 	HMUARTLGW_STATE_GET_FIRMWARE       => 8,
 	HMUARTLGW_STATE_GET_SERIAL         => 9,
-	HMUARTLGW_STATE_ENABLE_CSMACA      => 10,
-	HMUARTLGW_STATE_ENABLE_CREDITS     => 11,
-	HMUARTLGW_STATE_GET_INIT_CREDITS   => 12,
-	HMUARTLGW_STATE_SET_CURRENT_KEY    => 13,
-	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 14,
-	HMUARTLGW_STATE_SET_TEMP_KEY       => 15,
-	HMUARTLGW_STATE_GET_PEERS          => 16,
+	HMUARTLGW_STATE_SET_NORMAL_MODE    => 10,
+	HMUARTLGW_STATE_ENABLE_CSMACA      => 11,
+	HMUARTLGW_STATE_ENABLE_CREDITS     => 12,
+	HMUARTLGW_STATE_GET_INIT_CREDITS   => 13,
+	HMUARTLGW_STATE_SET_CURRENT_KEY    => 14,
+	HMUARTLGW_STATE_SET_PREVIOUS_KEY   => 15,
+	HMUARTLGW_STATE_SET_TEMP_KEY       => 16,
+	HMUARTLGW_STATE_GET_PEERS          => 17,
 	HMUARTLGW_STATE_UPDATE_PEER        => 90,
 	HMUARTLGW_STATE_UPDATE_PEER_AES1   => 91,
 	HMUARTLGW_STATE_UPDATE_PEER_AES2   => 92,
 	HMUARTLGW_STATE_UPDATE_PEER_CFG    => 93,
+	HMUARTLGW_STATE_SET_UPDATE_MODE    => 95,
 	HMUARTLGW_STATE_KEEPALIVE_INIT     => 96,
 	HMUARTLGW_STATE_KEEPALIVE_SENT     => 97,
 	HMUARTLGW_STATE_GET_CREDITS        => 98,
@@ -481,6 +483,18 @@ sub HMUARTLGW_SendPendingCmd($)
 			$hash->{DevState} = HMUARTLGW_STATE_ENABLE_CSMACA;
 			HMUARTLGW_GetSetParameterReq($hash);
 			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
+		} elsif ($cmd eq "UpdateMode") {
+			Log3($hash, 5, "HMUARTLGW ${name} Entering HM update mode (100k)");
+			$hash->{Helper}{OneParameterOnly} = 1;
+			$hash->{DevState} = HMUARTLGW_STATE_SET_UPDATE_MODE;
+			HMUARTLGW_GetSetParameterReq($hash);
+			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
+		} elsif ($cmd eq "NormalMode") {
+			Log3($hash, 5, "HMUARTLGW ${name} Entering HM normal mode (10k)");
+			$hash->{Helper}{OneParameterOnly} = 1;
+			$hash->{DevState} = HMUARTLGW_STATE_SET_NORMAL_MODE;
+			HMUARTLGW_GetSetParameterReq($hash);
+			shift(@{$hash->{Helper}{PendingCMD}}); #retry will be handled by GetSetParameter
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
 			if (defined($hash->{Helper}{RetryCnt}) && $hash->{Helper}{RetryCnt} >= 15) {
@@ -668,6 +682,9 @@ sub HMUARTLGW_GetSetParameterReq($) {
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_SERIAL) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_SERIAL, HMUARTLGW_DST_OS);
 
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_NORMAL_MODE) {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_NORMAL_MODE, HMUARTLGW_DST_OS);
+
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_ENABLE_CSMACA) {
 		my $csma_ca = AttrVal($name, "csmaCa", 1);
 
@@ -710,6 +727,10 @@ sub HMUARTLGW_GetSetParameterReq($) {
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_CREDITS, HMUARTLGW_DST_OS);
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_UPDATE_MODE) {
+		#E9CA is magic
+		HMUARTLGW_send($hash, HMUARTLGW_OS_UPDATE_MODE . "E9CA", HMUARTLGW_DST_OS);
 
 	} else {
 		return;
@@ -771,6 +792,9 @@ sub HMUARTLGW_GetSetParameters($;$)
 			$hash->{FW} = hex((substr($msg, 10, 6)));
 			readingsSingleUpdate($hash, "D-firmware", $fw, 1);
 		}
+		$hash->{DevState} = HMUARTLGW_STATE_SET_NORMAL_MODE;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_NORMAL_MODE) {
 		$hash->{DevState} = HMUARTLGW_STATE_GET_SERIAL;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_SERIAL) {
@@ -832,6 +856,10 @@ sub HMUARTLGW_GetSetParameters($;$)
 		}
 		delete($hash->{Helper}{CreditFailed});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+
+	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_UPDATE_MODE) {
+		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
+
 	}
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_RUNNING &&
@@ -1305,6 +1333,14 @@ sub HMUARTLGW_Write($$$;$)
 	} elsif ($msg =~ m/^writeAesKey:(.*)$/) {
 		HMUARTLGW_writeAesKey($1);
 		return;
+	} elsif ($msg =~ /^G(..)$/) {
+		my $speed = hex($1);
+
+		if ($speed == 100) {
+			push @{$hash->{Helper}{PendingCMD}}, "UpdateMode";
+		} else {
+			push @{$hash->{Helper}{PendingCMD}}, "NormalMode";
+		}
 	} elsif (length($msg) > 21) {
 		my ($mtype,$src,$dst) = (substr($msg, 8, 2),
 		                         substr($msg, 10, 6),
