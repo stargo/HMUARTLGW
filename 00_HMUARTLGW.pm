@@ -506,7 +506,7 @@ sub HMUARTLGW_SendPendingCmd($)
 				#try next command
 				return HMUARTLGW_SendPendingCmd($hash);
 			} elsif ($cmd->{RetryCnt}) {
-				Log3($hash, 1, "HMUARTLGW ${name} Retry: ".$cmd->{RetryCnt});
+				Log3($hash, 5, "HMUARTLGW ${name} Retry: ".$cmd->{RetryCnt});
 			}
 
 			RemoveInternalTimer($hash);
