@@ -502,9 +502,8 @@ sub HMUARTLGW_SendPendingCmd($)
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
 			if (defined($cmd->{RetryCnt}) && $cmd->{RetryCnt} >= 15) {
-				my $oldmsg = shift(@{$hash->{Helper}{PendingCMD}});
-				delete($hash->{Helper}{RetryCnt});
-				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 $oldmsg->{cmd}");
+				$hash->{Helper}{LastCMDs}{ResendErr} = shift(@{$hash->{Helper}{PendingCMD}});
+				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 $hash->{Helper}{LastCMDs}{ResendErr}{cmd}");
 				#try next command
 				return HMUARTLGW_SendPendingCmd($hash);
 			} elsif ($cmd->{RetryCnt}) {
@@ -1015,6 +1014,14 @@ sub HMUARTLGW_Parse($$$)
 	    $hash->{CNT} != $hash->{DEVCNT}) {
 		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping. We: $hash->{CNT}, device: $hash->{DEVCNT}, " .
 		               "state: $hash->{DevState}, msg: ${dst} ${msg}");
+
+		Log3($hash, 1 ,"HMUARTLGW ${name} seems to be an answer for NoAck msg $hash->{Helper}{LastCMDs}{NoAck}{cmd}")
+		    if ($hash->{Helper}{LastCMDs} && $hash->{Helper}{LastCMDs}{NoAck} &&
+		        $hash->{Helper}{LastCMDs}{NoAck}{CNT} eq $hash->{DEVCNT});
+
+		Log3($hash, 1 ,"HMUARTLGW ${name} seems to be an answer for ResendErr msg $hash->{Helper}{LastCMDs}{ResendErr}{cmd}")
+		    if ($hash->{Helper}{LastCMDs} && $hash->{Helper}{LastCMDs}{ResendErr} &&
+		        $hash->{Helper}{LastCMDs}{ResendErr}{CNT} eq $hash->{DEVCNT});
 		return;
 	}
 
@@ -1465,7 +1472,7 @@ sub HMUARTLGW_CheckCmdResp($)
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
-		shift(@{$hash->{Helper}{PendingCMD}});
+		$hash->{Helper}{LastCMDs}{NoAck} = shift(@{$hash->{Helper}{PendingCMD}});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
