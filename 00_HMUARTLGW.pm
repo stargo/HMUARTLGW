@@ -1012,15 +1012,15 @@ sub HMUARTLGW_Parse($$$)
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
-		if (defined($hash->{Helper}{AckPending}[$hash->{DEVCNT}])) {
+		if (defined($hash->{Helper}{AckPending}{$hash->{DEVCNT}})) {
 			Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 			            "HMUARTLGW ${name} got delayed ACK for request " .
-			            $hash->{DEVCNT}.": ".$hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{dst} .
-			            " " . $hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{cmd} .
-			            sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{time})) .
+			            $hash->{DEVCNT}.": ".$hash->{Helper}{AckPending}{$hash->{DEVCNT}}->{dst} .
+			            " " . $hash->{Helper}{AckPending}{$hash->{DEVCNT}}->{cmd} .
+			            sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}{$hash->{DEVCNT}}->{time})) .
 			            "s late)");
 
-			delete($hash->{Helper}{AckPending}[$hash->{DEVCNT}]);
+			delete($hash->{Helper}{AckPending}{$hash->{DEVCNT}});
 
 			return;
 		}
@@ -1030,7 +1030,7 @@ sub HMUARTLGW_Parse($$$)
 
 		return;
 	} elsif ($msg =~ m/^04/) {
-		delete($hash->{Helper}{AckPending}[$hash->{DEVCNT}]);
+		delete($hash->{Helper}{AckPending}{$hash->{DEVCNT}});
 	}
 
 	if ($msg =~ m/^04/ &&
@@ -1830,14 +1830,14 @@ sub HMUARTLGW_send($$$)
 
 	HMUARTLGW_send_frame($hash, $frame);
 
-	if (defined($hash->{Helper}{AckPending}[$hash->{CNT}])) {
+	if (defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
 		Log3($hash, 1, "HMUARTLGW ${name} never got an ACK for request ".
-			       $hash->{CNT}.": ".$hash->{Helper}{AckPending}[$hash->{CNT}]->{dst} .
-			       " " . $hash->{Helper}{AckPending}[$hash->{CNT}]->{cmd} .
-		               sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}[$hash->{CNT}]->{time})).
+			       $hash->{CNT}.": ".$hash->{Helper}{AckPending}{$hash->{CNT}}->{dst} .
+			       " " . $hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd} .
+		               sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}{$hash->{CNT}}->{time})).
 		               "s ago)");
 	}
-	$hash->{Helper}{AckPending}[$hash->{CNT}] = {
+	$hash->{Helper}{AckPending}{$hash->{CNT}} = {
 		cmd => uc($msg),
 		dst => $dst,
 		time => scalar(gettimeofday()),
