@@ -1479,6 +1479,7 @@ sub HMUARTLGW_CheckCmdResp($)
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
+		shift(@{$hash->{Helper}{PendingCMD}});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
