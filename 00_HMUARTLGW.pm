@@ -164,7 +164,6 @@ sub HMUARTLGW_DoInit($)
 	delete($hash->{msgLoadCurrentRaw});
 	delete($hash->{msgLoadHistory});
 	delete($hash->{msgLoadHistoryAbs});
-	delete($hash->{FW});
 	delete($hash->{owner});
 	$hash->{DevState} = HMUARTLGW_STATE_NONE;
 	$hash->{XmitOpen} = 0;
@@ -800,7 +799,7 @@ sub HMUARTLGW_GetSetParameters($;$)
 			my $fw = hex(substr($msg, 10, 2)).".".
 			         hex(substr($msg, 12, 2)).".".
 			         hex(substr($msg, 14, 2));
-			$hash->{FW} = hex((substr($msg, 10, 6)));
+			$hash->{Helper}{FW} = hex((substr($msg, 10, 6)));
 			readingsSingleUpdate($hash, "D-firmware", $fw, 1);
 		}
 		$hash->{DevState} = HMUARTLGW_STATE_SET_NORMAL_MODE;
@@ -1394,7 +1393,7 @@ sub HMUARTLGW_Write($$$)
 
 		my $cmd = HMUARTLGW_APP_SEND . "0000";
 
-		if ($hash->{FW} > 0x010006) { #TODO: Find real version which adds this
+		if ($hash->{Helper}{FW} > 0x010006) { #TODO: Find real version which adds this
 			$cmd .= ((hex(substr($msg, 6, 2)) & 0x10) ? "01" : "00");
 		}
 
@@ -1799,7 +1798,7 @@ sub HMUARTLGW_send($$$)
 
 		my $m = $4;
 
-		if ($hash->{FW} > 0x010006) {
+		if ($hash->{Helper}{FW} > 0x010006) {
 			$log .= substr($m, 0, 2, '') . " ";
 		} else {
 			$log .= "XX ";
