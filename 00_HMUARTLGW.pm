@@ -1277,9 +1277,19 @@ sub HMUARTLGW_Read($)
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
 		if ($crc != 0x0000) {
-			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame (FD".uc(unpack("H*", $unescaped)).")!");
-			undef($unprocessed);
-			next;
+			my $devcnt = ord(substr($unescaped, 3, 1));
+			if ($devcnt == $hash->{CNT} &&
+			    defined($hash->{Helper}{AckPending}{$devcnt})) {
+				#When writing to the device while it prepares to write a frame to
+				#the host, the device seems to prefix the sent frame with something
+				#depending on the data written to it (firmware bug). Accept frames
+				#for now.
+				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, probably caused by send. Processing frame!");
+			} else {
+				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame (FD".uc(unpack("H*", $unescaped)).")!");
+				undef($unprocessed);
+				next;
+			}
 		}
 
 		Log3($hash, 5, "HMUARTLGW ${name} read (".length($unescaped)."): fd".unpack("H*", $unescaped)." crc OK");
@@ -1865,16 +1875,6 @@ sub HMUARTLGW_send_frame($$)
 	}
 
 	$escaped = HMUARTLGW_encrypt($hash, $escaped) if ($hash->{crypto});
-
-	#The module seems to corrupt data when writing to it while it
-	#delivers new data...
-	my $rin = '';
-	vec($rin, $hash->{FD}, 1) = 1;
-	my $n = select($rin, undef, undef, 0);
-	if ($n > 0) {
-		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
-		     "HMUARTLGW ${name} send: FD is readable! This might corrupt the received frame!");
-	}
 
 	DevIo_SimpleWrite($hash, $escaped, 0);
 }
