@@ -502,8 +502,8 @@ sub HMUARTLGW_SendPendingCmd($)
 		} else {
 			#try for 3s, packet was not sent wirelessly yet!
 			if (defined($cmd->{RetryCnt}) && $cmd->{RetryCnt} >= 15) {
-				$hash->{Helper}{LastCMDs}{ResendErr} = shift(@{$hash->{Helper}{PendingCMD}});
-				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 $hash->{Helper}{LastCMDs}{ResendErr}{cmd}");
+				my $oldmsg = shift(@{$hash->{Helper}{PendingCMD}});
+				Log3($hash, 1, "HMUARTLGW ${name} resend failed too often, dropping packet: 01 $oldmsg->{cmd}");
 				#try next command
 				return HMUARTLGW_SendPendingCmd($hash);
 			} elsif ($cmd->{RetryCnt}) {
@@ -1012,17 +1012,25 @@ sub HMUARTLGW_Parse($$$)
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{CNT} != $hash->{DEVCNT}) {
+		if (defined($hash->{Helper}{AckPending}[$hash->{DEVCNT}])) {
+			Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+			            "HMUARTLGW ${name} got delayed ACK for request " .
+			            $hash->{DEVCNT}.": ".$hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{dst} .
+			            " " . $hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{cmd} .
+			            sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}[$hash->{DEVCNT}]->{time})) .
+			            "s late)");
+
+			delete($hash->{Helper}{AckPending}[$hash->{DEVCNT}]);
+
+			return;
+		}
+
 		Log3($hash, 1 ,"HMUARTLGW ${name} Ack with invalid counter received, dropping. We: $hash->{CNT}, device: $hash->{DEVCNT}, " .
 		               "state: $hash->{DevState}, msg: ${dst} ${msg}");
 
-		Log3($hash, 1 ,"HMUARTLGW ${name} seems to be an answer for NoAck msg $hash->{Helper}{LastCMDs}{NoAck}{cmd}")
-		    if ($hash->{Helper}{LastCMDs} && $hash->{Helper}{LastCMDs}{NoAck} &&
-		        $hash->{Helper}{LastCMDs}{NoAck}{CNT} eq $hash->{DEVCNT});
-
-		Log3($hash, 1 ,"HMUARTLGW ${name} seems to be an answer for ResendErr msg $hash->{Helper}{LastCMDs}{ResendErr}{cmd}")
-		    if ($hash->{Helper}{LastCMDs} && $hash->{Helper}{LastCMDs}{ResendErr} &&
-		        $hash->{Helper}{LastCMDs}{ResendErr}{CNT} eq $hash->{DEVCNT});
 		return;
+	} elsif ($msg =~ m/^04/) {
+		delete($hash->{Helper}{AckPending}[$hash->{DEVCNT}]);
 	}
 
 	if ($msg =~ m/^04/ &&
@@ -1472,7 +1480,6 @@ sub HMUARTLGW_CheckCmdResp($)
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		return HMUARTLGW_SendPendingCmd($hash);
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SEND_NOACK) {
-		$hash->{Helper}{LastCMDs}{NoAck} = shift(@{$hash->{Helper}{PendingCMD}});
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 		#try next command
 		return HMUARTLGW_SendPendingCmd($hash);
@@ -1822,6 +1829,19 @@ sub HMUARTLGW_send($$$)
 	$frame .= pack("n", HMUARTLGW_crc16($frame));
 
 	HMUARTLGW_send_frame($hash, $frame);
+
+	if (defined($hash->{Helper}{AckPending}[$hash->{CNT}])) {
+		Log3($hash, 1, "HMUARTLGW ${name} never got an ACK for request ".
+			       $hash->{CNT}.": ".$hash->{Helper}{AckPending}[$hash->{CNT}]->{dst} .
+			       " " . $hash->{Helper}{AckPending}[$hash->{CNT}]->{cmd} .
+		               sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}[$hash->{CNT}]->{time})).
+		               "s ago)");
+	}
+	$hash->{Helper}{AckPending}[$hash->{CNT}] = {
+		cmd => uc($msg),
+		dst => $dst,
+		time => scalar(gettimeofday()),
+	};
 
 	return $hash->{CNT};
 }
