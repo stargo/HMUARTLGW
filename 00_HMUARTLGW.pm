@@ -1277,9 +1277,8 @@ sub HMUARTLGW_Read($)
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
 		if ($crc != 0x0000) {
-			my $devcnt = ord(substr($unescaped, 3, 1));
-			if ($devcnt == $hash->{CNT} &&
-			    defined($hash->{Helper}{AckPending}{$devcnt})) {
+			if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING &&
+			    defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
 				#When writing to the device while it prepares to write a frame to
 				#the host, the device seems to prefix the sent frame with something
 				#depending on the data written to it (firmware bug). Accept frames
@@ -1841,11 +1840,12 @@ sub HMUARTLGW_send($$$)
 	HMUARTLGW_send_frame($hash, $frame);
 
 	if (defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
-		Log3($hash, 1, "HMUARTLGW ${name} never got an ACK for request ".
-			       $hash->{CNT}.": ".$hash->{Helper}{AckPending}{$hash->{CNT}}->{dst} .
-			       " " . $hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd} .
-		               sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}{$hash->{CNT}}->{time})).
-		               "s ago)");
+		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
+		            "HMUARTLGW ${name} never got an ACK for request ".
+			    $hash->{CNT}.": ".$hash->{Helper}{AckPending}{$hash->{CNT}}->{dst} .
+			    " " . $hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd} .
+		            sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}{$hash->{CNT}}->{time})).
+		            "s ago)");
 	}
 	$hash->{Helper}{AckPending}{$hash->{CNT}} = {
 		cmd => uc($msg),
