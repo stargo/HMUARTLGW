@@ -1378,7 +1378,7 @@ sub HMUARTLGW_Write($$$)
 			return;
 		} elsif ($mtype eq "02" && $src ne $hash->{owner} &&
 		    defined($hash->{Peers}{$dst})) {
-			Log3($hash, 0, "HMUARTLGW ${name}: Can't send ACK originating not from my hmId, please use a VCCU virtual device!");
+			Log3($hash, 0, "HMUARTLGW ${name}: Can't send ACK not originating from my hmId (firmware bug), please use a VCCU virtual device!");
 			return;
 		}
 
