@@ -1371,10 +1371,14 @@ sub HMUARTLGW_Write($$$)
 		                         substr($msg, 16, 6));
 
 		if ($mtype eq "02" && $src eq $hash->{owner} && length($msg) == 24 &&
-		    defined($hash->{Peers}{$dst})){
+		    defined($hash->{Peers}{$dst})) {
 			# Acks are generally send by HMUARTLGW autonomously
 			# Special
 			Log3($hash, 5, "HMUARTLGW ${name}: Skip ACK");
+			return;
+		} elsif ($mtype eq "02" && $src ne $hash->{owner} &&
+		    defined($hash->{Peers}{$dst})) {
+			Log3($hash, 0, "HMUARTLGW ${name}: Can't send ACK originating not from my hmId, please use a VCCU virtual device!");
 			return;
 		}
 
