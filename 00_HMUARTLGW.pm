@@ -144,7 +144,7 @@ sub HMUARTLGW_updateMsgLoad($$);
 sub HMUARTLGW_Read($);
 sub HMUARTLGW_send($$$);
 sub HMUARTLGW_send_frame($$);
-sub HMUARTLGW_crc16($);
+sub HMUARTLGW_crc16($;$);
 sub HMUARTLGW_encrypt($$);
 sub HMUARTLGW_decrypt($$);
 sub HMUARTLGW_getVerbLvl($$$$);
@@ -1276,19 +1276,21 @@ sub HMUARTLGW_Read($)
 		next if (length($unescaped) < $len + 4); #short read
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
+		if ($crc != 0x0000 &&
+		    $hash->{DevState} != HMUARTLGW_STATE_RUNNING &&
+		    defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
+			#When writing to the device while it prepares to write a frame to
+			#the host, the device seems to initialize the crc with 0x827f plus
+			#the length of the frame being received (firmware bug).
+			my $slen = (length($hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd}) / 2) + 2;
+			$crc = HMUARTLGW_crc16(chr(0xfd).$unescaped, 0x827f + $slen);
+			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
+		}
+
 		if ($crc != 0x0000) {
-			if ($hash->{DevState} != HMUARTLGW_STATE_RUNNING &&
-			    defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
-				#When writing to the device while it prepares to write a frame to
-				#the host, the device seems to prefix the sent frame with something
-				#depending on the data written to it (firmware bug). Accept frames
-				#for now.
-				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, probably caused by send. Processing frame!");
-			} else {
-				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame (FD".uc(unpack("H*", $unescaped)).")!");
-				undef($unprocessed);
-				next;
-			}
+			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, dropping frame (FD".uc(unpack("H*", $unescaped)).")!");
+			undef($unprocessed);
+			next;
 		}
 
 		Log3($hash, 5, "HMUARTLGW ${name} read (".length($unescaped)."): fd".unpack("H*", $unescaped)." crc OK");
@@ -1895,10 +1897,10 @@ sub HMUARTLGW_sendAscii($$)
 	DevIo_SimpleWrite($hash, $msg, 2);
 }
 
-sub HMUARTLGW_crc16($)
+sub HMUARTLGW_crc16($;$)
 {
-	my ($msg) = @_;
-	my $crc = 0xd77f;
+	my ($msg, $crc) = @_;
+	$crc = 0xd77f if (!defined($crc));
 
 	foreach my $byte (split(//, $msg)) {
 		$crc ^= (ord($byte) << 8) & 0xff00;
