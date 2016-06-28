@@ -1277,14 +1277,15 @@ sub HMUARTLGW_Read($)
 
 		my $crc = HMUARTLGW_crc16(chr(0xfd).$unescaped);
 		if ($crc != 0x0000 &&
-		    $hash->{DevState} != HMUARTLGW_STATE_RUNNING &&
-		    defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
+		    $hash->{DevState} != HMUARTLGW_STATE_RUNNING) {
 			#When writing to the device while it prepares to write a frame to
 			#the host, the device seems to initialize the crc with 0x827f plus
 			#the length of the frame being received (firmware bug).
-			my $slen = (length($hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd}) / 2) + 2;
-			$crc = HMUARTLGW_crc16(chr(0xfd).$unescaped, 0x827f + $slen);
-			Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
+			foreach my $slen (reverse(@{$hash->{Helper}{LastSendLen}})) {
+				$crc = HMUARTLGW_crc16(chr(0xfd).$unescaped, 0x827f + $slen);
+				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
+				last if ($crc == 0x0000);
+			}
 		}
 
 		if ($crc != 0x0000) {
@@ -1858,6 +1859,9 @@ sub HMUARTLGW_send($$$)
 		dst => $dst,
 		time => scalar(gettimeofday()),
 	};
+
+	push @{$hash->{Helper}{LastSendLen}}, (length($hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd}) / 2) + 2;
+	shift @{$hash->{Helper}{LastSendLen}} if (scalar(@{$hash->{Helper}{LastSendLen}}) > 3);
 
 	return $hash->{CNT};
 }
