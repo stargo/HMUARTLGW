@@ -102,6 +102,7 @@ my %sets = (
 	"reopen"       => "",
 	"open"         => "",
 	"close"        => "",
+	"restart"      => "",
 );
 
 my %gets = (
@@ -1565,6 +1566,8 @@ sub HMUARTLGW_Set($@)
 		$hash->{XmitOpen} = 0;
 	} elsif($cmd eq "open") {
 		DevIo_OpenDev($hash, 0, "HMUARTLGW_DoInit");
+	} elsif($cmd eq "restart") {
+		HMUARTLGW_send($hash, HMUARTLGW_OS_CHANGE_APP, HMUARTLGW_DST_OS);
 	}
 
 	return undef;
@@ -2049,6 +2052,9 @@ sub HMUARTLGW_getVerbLvl($$$$) {
         </li>
     <li>reopen<br>
         Reopens the connection to the device and reinitializes it.
+        </li>
+    <li>restart<br>
+        Reboots the device.
         </li>
   </ul>
   <br>
