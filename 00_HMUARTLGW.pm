@@ -764,10 +764,19 @@ sub HMUARTLGW_GetSetParameters($;$)
 	Log3($hash, 1, "HMUARTLGW ${name} GetSet NACK: ${ack}, state ".$hash->{DevState}) if ($ack && $ack =~ m/^0400/);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
+		if ($hash->{Helper}{GetSetRetry} > 10) {
+			delete($hash->{Helper}{GetSetRetry});
+			#Reboot device
+			HMUARTLGW_send($hash, HMUARTLGW_OS_CHANGE_APP, HMUARTLGW_DST_OS);
+			return;
+		}
+		$hash->{Helper}{GetSetRetry}++;
+
 		#Retry
 		InternalTimer(gettimeofday()+0.5, "HMUARTLGW_GetSetParameterReq", $hash, 0);
 		return;
 	}
+	delete($hash->{Helper}{GetSetRetry});
 
 	if ($hash->{DevState} == HMUARTLGW_STATE_GETSET_PARAMETERS) {
 		if ($hmId) {
