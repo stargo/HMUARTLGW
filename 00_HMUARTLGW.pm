@@ -1284,10 +1284,11 @@ sub HMUARTLGW_Read($)
 			#0x8281 plus the length of the frame being received (firmware bug).
 			foreach my $slen (reverse(@{$hash->{Helper}{LastSendLen}})) {
 				$crc = HMUARTLGW_crc16(chr(0xfd).$unescaped, 0x827f + $slen);
-				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
+				Log3($hash, 5, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
 				last if ($crc == 0x0000);
+
 				$crc = HMUARTLGW_crc16(chr(0xfd).$unescaped, 0x8281 + $slen);
-				Log3($hash, 1, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
+				Log3($hash, 5, "HMUARTLGW ${name} invalid checksum received, recalculated with slen ${slen}: ${crc}");
 				last if ($crc == 0x0000);
 			}
 		}
