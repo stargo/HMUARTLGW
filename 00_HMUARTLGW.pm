@@ -764,7 +764,8 @@ sub HMUARTLGW_GetSetParameters($;$)
 	Log3($hash, 1, "HMUARTLGW ${name} GetSet NACK: ${ack}, state ".$hash->{DevState}) if ($ack && $ack =~ m/^0400/);
 
 	if ($ack && ($ack eq HMUARTLGW_ACK_EINPROGRESS)) {
-		if ($hash->{Helper}{GetSetRetry} > 10) {
+		if (defined($hash->{Helper}{GetSetRetry}) &&
+		    $hash->{Helper}{GetSetRetry} > 10) {
 			delete($hash->{Helper}{GetSetRetry});
 			#Reboot device
 			HMUARTLGW_send($hash, HMUARTLGW_OS_CHANGE_APP, HMUARTLGW_DST_OS);
