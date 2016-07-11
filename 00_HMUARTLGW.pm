@@ -1261,7 +1261,7 @@ sub HMUARTLGW_Read($)
 		(undef, my $frame, $p) = split(/\xfd/, $unprocessed, 3);
 		$p = chr(0xfd) . $p if ($p);
 
-		my $unescaped;
+		my $unescaped = '';
 		my $unescape_next = 0;
 		foreach my $byte (split(//, $frame)) {
 			if (ord($byte) == 0xfc) {
