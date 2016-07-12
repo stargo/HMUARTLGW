@@ -1771,6 +1771,9 @@ sub HMUARTLGW_updateCondition($)
 	readingsBulkUpdate($hash, "loadLvl", $loadLvl)
 	    if (defined($loadLvl) && $loadLvl ne ReadingsVal($name, "loadLvl", ""));
 	readingsEndUpdate($hash, 1);
+
+	my $ccu = InternalVal($name,"owner_CCU","");
+	CUL_HM_UpdtCentralState($ccu) if ($ccu);
 }
 
 sub HMUARTLGW_updateMsgLoad($$) {
