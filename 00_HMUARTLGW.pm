@@ -1250,7 +1250,7 @@ sub HMUARTLGW_Parse($$$$)
 			$wait += 0.100 if (hex($flags) & (1 << 5)); #compensate for automatic ack
 			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
 
-			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = gettimeofday() + $wait
+			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = $recvtime + $wait
 				if ($modules{CUL_HM}{defptr}{$src} && $wait > 0);
 
 			Dispatch($hash, $dmsg, \%addvals);
@@ -1905,20 +1905,20 @@ sub HMUARTLGW_send($$$)
 
 	$frame .= pack("n", HMUARTLGW_crc16($frame));
 
-	HMUARTLGW_send_frame($hash, $frame);
+	my $sendtime = HMUARTLGW_send_frame($hash, $frame);
 
 	if (defined($hash->{Helper}{AckPending}{$hash->{CNT}})) {
 		Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5),
 		            "HMUARTLGW ${name} never got an ACK for request ".
 			    $hash->{CNT}.": ".$hash->{Helper}{AckPending}{$hash->{CNT}}->{dst} .
 			    " " . $hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd} .
-		            sprintf(" (%.3f", (gettimeofday() - $hash->{Helper}{AckPending}{$hash->{CNT}}->{time})).
+		            sprintf(" (%.3f", ($sendtime - $hash->{Helper}{AckPending}{$hash->{CNT}}->{time})).
 		            "s ago)");
 	}
 	$hash->{Helper}{AckPending}{$hash->{CNT}} = {
 		cmd => uc($msg),
 		dst => $dst,
-		time => scalar(gettimeofday()),
+		time => $sendtime,
 	};
 
 	push @{$hash->{Helper}{LastSendLen}}, (length($hash->{Helper}{AckPending}{$hash->{CNT}}->{cmd}) / 2) + 2;
@@ -1947,7 +1947,10 @@ sub HMUARTLGW_send_frame($$)
 
 	$escaped = HMUARTLGW_encrypt($hash, $escaped) if ($hash->{crypto});
 
+	my $sendtime = scalar(gettimeofday());
 	DevIo_SimpleWrite($hash, $escaped, 0);
+
+	$sendtime;
 }
 
 sub HMUARTLGW_sendAscii($$)
