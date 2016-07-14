@@ -1246,7 +1246,7 @@ sub HMUARTLGW_Parse($$$)
 			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 
 			my $wait = 0.200;
-			$wait -= ($hash->{Helper}{RoundTrip}{Delay} / 2) if (defined($hash->{Helper}{RoundTrip}{Delay}));
+			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
 			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = gettimeofday() + $wait
 				if ($modules{CUL_HM}{defptr}{$src} && $wait > 0);
 
