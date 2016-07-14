@@ -1249,7 +1249,7 @@ sub HMUARTLGW_Parse($$$$)
 			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 
 			my $wait = 0.100;
-			$wait += 0.075 if (hex($flags) & (1 << 5)); #compensate for automatic ack
+			$wait += 0.100 if (hex($flags) & (1 << 5)); #compensate for automatic ack
 			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
 
 			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = gettimeofday() + $wait
@@ -1351,10 +1351,12 @@ sub HMUARTLGW_Read($)
 		my $dst = ord(substr($unescaped, 2, 1));
 		$hash->{DEVCNT} = ord(substr($unescaped, 3, 1));
 
-		HMUARTLGW_Parse($hash, uc(unpack("H*", substr($unescaped, 4, -2))), $dst, $recvtime);
+		my $msg = uc(unpack("H*", substr($unescaped, 4, -2)));
+		HMUARTLGW_Parse($hash, $msg, $dst, $recvtime);
 
 		delete($hash->{Helper}{AckPending}{$hash->{DEVCNT}})
-			if (defined($hash->{Helper}{AckPending}) &&
+			if (($msg =~ m/^04/) &&
+			    defined($hash->{Helper}{AckPending}) &&
 			    defined($hash->{Helper}{AckPending}{$hash->{DEVCNT}}));
 
 		undef($unprocessed);
