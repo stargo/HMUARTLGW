@@ -512,6 +512,19 @@ sub HMUARTLGW_SendPendingCmd($)
 
 			RemoveInternalTimer($hash);
 
+			my $dst = substr($cmd->{cmd}, 20, 6);
+			if ($modules{CUL_HM}{defptr}{$dst}{helper}{io}{nextSend}){
+				my $tn = gettimeofday();
+				my $dDly = $modules{CUL_HM}{defptr}{$dst}{helper}{io}{nextSend} - $tn;
+				#$dDly -= 0.05 if ($typ eq "02");# delay at least 50ms for ACK, but not 100
+				if ($dDly > 0.01) {
+					Log3($hash, 5, "HMUARTLGW ${name} delaying send to ${dst} for ${dDly}");
+					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
+					InternalTimer($tn + $dDly, "HMUARTLGW_SendPendingTimer", $hash, 0);
+					return;
+				}
+			}
+
 			if (hex(substr($cmd->{cmd}, 10, 2)) & (1 << 5)) { #BIDI
 				InternalTimer(gettimeofday()+HMUARTLGW_SEND_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 				$hash->{DevState} = HMUARTLGW_STATE_SEND;
@@ -737,6 +750,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		return;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
+		$hash->{Helper}{RoundTrip}{Send} = gettimeofday();
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_CREDITS, HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_UPDATE_MODE) {
@@ -872,6 +886,11 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
+		if (defined($hash->{Helper}{RoundTrip}{Send})) {
+			$hash->{Helper}{RoundTrip}{Delay} = gettimeofday() - $hash->{Helper}{RoundTrip}{Send};
+			delete($hash->{Helper}{RoundTrip}{Send});
+			Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} roundtrip delay: " . $hash->{Helper}{RoundTrip}{Delay});
+		}
 		if ($ack eq HMUARTLGW_ACK_INFO) {
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
 		}
@@ -1219,6 +1238,12 @@ sub HMUARTLGW_Parse($$$)
 			$dmsg = sprintf("A%02X%s:${CULinfo}:${rssi}:${name}", length($m)/2, uc($m));
 
 			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
+
+			my $wait = 0.200;
+			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
+			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = gettimeofday() + $wait
+				if ($modules{CUL_HM}{defptr}{$src} && $wait > 0);
+
 			Dispatch($hash, $dmsg, \%addvals);
 		}
 	}
