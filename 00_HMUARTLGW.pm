@@ -891,10 +891,8 @@ sub HMUARTLGW_GetSetParameters($;$$)
 		    defined($hash->{Helper}{RoundTrip}{Calc})) {
 			delete($hash->{Helper}{RoundTrip}{Calc});
 			my $delay = $recvtime - $hash->{Helper}{AckPending}{$hash->{DEVCNT}}->{time};
-			if ($delay < 0.2) {
-				$hash->{Helper}{RoundTrip}{Delay} = $delay;
-				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} roundtrip delay: " . $hash->{Helper}{RoundTrip}{Delay});
-			}
+			$hash->{Helper}{RoundTrip}{Delay} = $delay if ($delay < 0.2);
+			Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} roundtrip delay: ${delay}");
 		}
 		if ($ack eq HMUARTLGW_ACK_INFO) {
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
