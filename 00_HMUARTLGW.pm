@@ -750,7 +750,7 @@ sub HMUARTLGW_GetSetParameterReq($) {
 		return;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
-		$hash->{Helper}{RoundTrip}{Send} = gettimeofday();
+		$hash->{Helper}{RoundTrip}{Calc} = 1;
 		HMUARTLGW_send($hash, HMUARTLGW_OS_GET_CREDITS, HMUARTLGW_DST_OS);
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_SET_UPDATE_MODE) {
@@ -764,9 +764,9 @@ sub HMUARTLGW_GetSetParameterReq($) {
 	InternalTimer(gettimeofday()+HMUARTLGW_CMD_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
 }
 
-sub HMUARTLGW_GetSetParameters($;$)
+sub HMUARTLGW_GetSetParameters($;$$)
 {
-	my ($hash, $msg) = @_;
+	my ($hash, $msg, $recvtime) = @_;
 	my $name = $hash->{NAME};
 	my $oldState = $hash->{DevState};
 	my $hmId = AttrVal($name, "hmId", undef);
@@ -886,10 +886,15 @@ sub HMUARTLGW_GetSetParameters($;$)
 		$hash->{DevState} = HMUARTLGW_STATE_RUNNING;
 
 	} elsif ($hash->{DevState} == HMUARTLGW_STATE_GET_CREDITS) {
-		if (defined($hash->{Helper}{RoundTrip}{Send})) {
-			$hash->{Helper}{RoundTrip}{Delay} = gettimeofday() - $hash->{Helper}{RoundTrip}{Send};
-			delete($hash->{Helper}{RoundTrip}{Send});
-			Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} roundtrip delay: " . $hash->{Helper}{RoundTrip}{Delay});
+		if (defined($recvtime) &&
+		    defined($hash->{Helper}{AckPending}{$hash->{DEVCNT}}) &&
+		    defined($hash->{Helper}{RoundTrip}{Calc})) {
+			delete($hash->{Helper}{RoundTrip}{Calc});
+			my $delay = $recvtime - $hash->{Helper}{AckPending}{$hash->{DEVCNT}}->{time};
+			if ($delay < 0.2) {
+				$hash->{Helper}{RoundTrip}{Delay} = $delay;
+				Log3($hash, HMUARTLGW_getVerbLvl($hash, undef, undef, 5), "HMUARTLGW ${name} roundtrip delay: " . $hash->{Helper}{RoundTrip}{Delay});
+			}
 		}
 		if ($ack eq HMUARTLGW_ACK_INFO) {
 			HMUARTLGW_updateMsgLoad($hash, hex(substr($msg, 4)));
@@ -1025,9 +1030,9 @@ sub HMUARTLGW_GetSetParameters($;$)
 	}
 }
 
-sub HMUARTLGW_Parse($$$)
+sub HMUARTLGW_Parse($$$$)
 {
-	my ($hash, $msg, $dst) = @_;
+	my ($hash, $msg, $dst, $recvtime) = @_;
 	my $name = $hash->{NAME};
 
 	my $recv;
@@ -1058,21 +1063,19 @@ sub HMUARTLGW_Parse($$$)
 		               "state: $hash->{DevState}, msg: ${dst} ${msg}");
 
 		return;
-	} elsif ($msg =~ m/^04/) {
-		delete($hash->{Helper}{AckPending}{$hash->{DEVCNT}});
 	}
 
 	if ($msg =~ m/^04/ &&
 	    $hash->{DevState} >= HMUARTLGW_STATE_GETSET_PARAMETERS &&
 	    $hash->{DevState} < HMUARTLGW_STATE_RUNNING) {
-		HMUARTLGW_GetSetParameters($hash, $msg);
+		HMUARTLGW_GetSetParameters($hash, $msg, $recvtime);
 		return;
 	}
 
-	if (defined($hash->{Helper}{RoundTrip}{Send})) {
+	if (defined($hash->{Helper}{RoundTrip}{Calc})) {
 		#We have received another message while calculating delay.
 		#This will skew the calculation, so don't do it now
-		delete($hash->{Helper}{RoundTrip}{Send});
+		delete($hash->{Helper}{RoundTrip}{Calc});
 	}
 
 	if ($dst == HMUARTLGW_DST_OS) {
@@ -1245,8 +1248,10 @@ sub HMUARTLGW_Parse($$$)
 
 			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 
-			my $wait = 0.200;
+			my $wait = 0.100;
+			$wait += 0.075 if (hex($flags) & (1 << 5)); #compensate for automatic ack
 			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
+
 			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = gettimeofday() + $wait
 				if ($modules{CUL_HM}{defptr}{$src} && $wait > 0);
 
@@ -1261,6 +1266,7 @@ sub HMUARTLGW_Read($)
 {
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
+	my $recvtime = gettimeofday();
 
 	my $buf = DevIo_SimpleRead($hash);
 	return "" if (!defined($buf));
@@ -1345,7 +1351,11 @@ sub HMUARTLGW_Read($)
 		my $dst = ord(substr($unescaped, 2, 1));
 		$hash->{DEVCNT} = ord(substr($unescaped, 3, 1));
 
-		HMUARTLGW_Parse($hash, uc(unpack("H*", substr($unescaped, 4, -2))), $dst);
+		HMUARTLGW_Parse($hash, uc(unpack("H*", substr($unescaped, 4, -2))), $dst, $recvtime);
+
+		delete($hash->{Helper}{AckPending}{$hash->{DEVCNT}})
+			if (defined($hash->{Helper}{AckPending}) &&
+			    defined($hash->{Helper}{AckPending}{$hash->{DEVCNT}}));
 
 		undef($unprocessed);
 	}
