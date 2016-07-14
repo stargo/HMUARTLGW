@@ -513,7 +513,8 @@ sub HMUARTLGW_SendPendingCmd($)
 			RemoveInternalTimer($hash);
 
 			my $dst = substr($cmd->{cmd}, 20, 6);
-			if ($modules{CUL_HM}{defptr}{$dst}{helper}{io}{nextSend}){
+			if ((!defined($cmd->{delayed})) &&
+			    $modules{CUL_HM}{defptr}{$dst}{helper}{io}{nextSend}){
 				my $tn = gettimeofday();
 				my $dDly = $modules{CUL_HM}{defptr}{$dst}{helper}{io}{nextSend} - $tn;
 				#$dDly -= 0.05 if ($typ eq "02");# delay at least 50ms for ACK, but not 100
@@ -521,9 +522,12 @@ sub HMUARTLGW_SendPendingCmd($)
 					Log3($hash, 5, "HMUARTLGW ${name} delaying send to ${dst} for ${dDly}");
 					$hash->{DevState} = HMUARTLGW_STATE_SEND_TIMED;
 					InternalTimer($tn + $dDly, "HMUARTLGW_SendPendingTimer", $hash, 0);
+					$cmd->{delayed} = 1;
 					return;
 				}
 			}
+
+			delete($cmd->{delayed}) if (defined($cmd->{delayed}));
 
 			if (hex(substr($cmd->{cmd}, 10, 2)) & (1 << 5)) { #BIDI
 				InternalTimer(gettimeofday()+HMUARTLGW_SEND_TIMEOUT, "HMUARTLGW_CheckCmdResp", $hash, 0);
@@ -1246,8 +1250,13 @@ sub HMUARTLGW_Parse($$$$)
 
 			Log3($hash, 5, "HMUARTLGW ${name} Dispatch: ${dmsg}");
 
-			my $wait = 0.100;
-			$wait += 0.100 if (hex($flags) & (1 << 5)); #compensate for automatic ack
+			my $wait = 0;
+			if (!(hex($flags) & (1 << 5))) {
+				#!BIDI
+				$wait = 0.070;
+			} else {
+				$wait = 0;
+			}
 			$wait -= $hash->{Helper}{RoundTrip}{Delay} if (defined($hash->{Helper}{RoundTrip}{Delay}));
 
 			$modules{CUL_HM}{defptr}{$src}{helper}{io}{nextSend} = $recvtime + $wait
