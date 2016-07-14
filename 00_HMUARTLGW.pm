@@ -1069,6 +1069,12 @@ sub HMUARTLGW_Parse($$$)
 		return;
 	}
 
+	if (defined($hash->{Helper}{RoundTrip}{Send})) {
+		#We have received another message while calculating delay.
+		#This will skew the calculation, so don't do it now
+		delete($hash->{Helper}{RoundTrip}{Send});
+	}
+
 	if ($dst == HMUARTLGW_DST_OS) {
 		if ($msg =~ m/^00(..)/) {
 			my $running = pack("H*", substr($msg, 2));
