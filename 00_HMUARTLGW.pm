@@ -1253,7 +1253,7 @@ sub HMUARTLGW_Parse($$$$)
 			my $wait = 0;
 			if (!(hex($flags) & (1 << 5))) {
 				#!BIDI
-				$wait = 0.070;
+				$wait = 0.090;
 			} else {
 				$wait = 0;
 			}
