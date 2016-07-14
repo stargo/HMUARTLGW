@@ -579,7 +579,7 @@ sub HMUARTLGW_UpdatePeerReq($;$) {
 			       $peer->{id} .
 			       $peer->{kNo} .
 			       (($flags & 0x02) ? "01" : "00") . #Wakeup?
-			       (($flags & 0x02) ? "01" : "00");  #Wakeup?
+			       "00"; #setting this causes "0013" messages for thermostats on wakeup ?!
 		} else {
 			$msg = HMUARTLGW_APP_REMOVE_PEER . $peer->{id};
 		}
